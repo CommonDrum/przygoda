@@ -1,14 +1,14 @@
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from .config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 ALGORITHM = "HS256"
@@ -24,8 +24,14 @@ class LoginRequest(BaseModel):
     password: str
 
 
+def hash_password(plain: str) -> str:
+    """PBKDF2-SHA256 hash using JWT_SECRET_KEY as salt. Returns hex string."""
+    dk = hashlib.pbkdf2_hmac("sha256", plain.encode(), settings.JWT_SECRET_KEY.encode(), 600_000)
+    return dk.hex()
+
+
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return hmac.compare_digest(hash_password(plain), hashed)
 
 
 def create_access_token(subject: str) -> str:

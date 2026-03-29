@@ -1,7 +1,8 @@
-"""Generate a bcrypt hash for use in .env APP_PASSWORD_HASH."""
+"""Generate a PBKDF2-SHA256 hash for use in .env APP_PASSWORD_HASH."""
+import hashlib
 import sys
-from passlib.context import CryptContext
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 password = sys.argv[1] if len(sys.argv) > 1 else input("Password: ")
-print(pwd_context.hash(password))
+salt = sys.argv[2] if len(sys.argv) > 2 else input("JWT_SECRET_KEY: ")
+dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 600_000)
+print(dk.hex())
