@@ -1,0 +1,29 @@
+services:
+  backend:
+    build:
+      context: .
+      target: backend
+    env_file: backend/.env
+    environment:
+      - DATA_DIR=/data
+      - DATABASE_URL=/data/przygoda.db
+    volumes:
+      - data:/data
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: .
+      target: nginx
+    ports:
+      - "${PORT:-80}:80"
+    volumes:
+      - data:/data:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  data:

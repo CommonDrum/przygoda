@@ -1,0 +1,8 @@
+node_modules
+frontend/dist
+backend/przygoda.db
+backend/.env
+__pycache__
+*.pyc
+.git
+.claude
