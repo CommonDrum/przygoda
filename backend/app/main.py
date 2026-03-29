@@ -12,10 +12,12 @@ from .routers import projects, pages, settings, generation, exports, auth
 from .services.ws_manager import ConnectionManager
 
 
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
     await init_db()
     await seed_demo_project()
     manager = ConnectionManager()
