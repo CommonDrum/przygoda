@@ -1,7 +1,10 @@
 import asyncio
+import logging
 import os
 
 from ..database import get_db
+
+logger = logging.getLogger(__name__)
 from ..providers.factory import get_llm_provider, get_image_provider
 from ..routers.settings import get_setting_value
 from ..templates.story_prompt import build_story_system_prompt, build_story_user_prompt
@@ -228,6 +231,7 @@ async def generate_images(project_id: int, ws_manager: ConnectionManager):
                 "image_path": ref_image_path,
             })
         except Exception as e:
+            logger.error("Reference image failed: %s", e, exc_info=True)
             await ws_manager.send_to_project(project_id, {
                 "type": "image_progress",
                 "page_number": 0,
@@ -292,6 +296,7 @@ async def generate_images(project_id: int, ws_manager: ConnectionManager):
                 })
                 completed_count += 1
             except Exception as e:
+                logger.error("Image gen failed page %d: %s", page_num, e, exc_info=True)
                 await ws_manager.send_to_project(project_id, {
                     "type": "image_progress",
                     "page_number": page_num,

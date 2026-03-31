@@ -35,13 +35,14 @@ class GoogleLLM(LLMProvider):
         self, system_prompt: str, user_prompt: str
     ) -> AsyncIterator[str]:
         client = await self._get_client()
-        async for chunk in client.aio.models.generate_content_stream(
+        stream = await client.aio.models.generate_content_stream(
             model=self.MODEL,
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 max_output_tokens=8192,
             ),
-        ):
+        )
+        async for chunk in stream:
             if chunk.text:
                 yield chunk.text
