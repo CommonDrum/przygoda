@@ -200,6 +200,9 @@ export default function ProjectViewPage() {
             <p className="text-bark-300 text-sm mt-0.5">
               {project.story_type} &middot; {project.hobby}
             </p>
+            <p className="text-bark-200 text-xs mt-1">
+              LLM: {project.llm_provider} &middot; Obrazki: {project.image_provider}
+            </p>
           </div>
         </div>
         <StatusBadge status={project.status} />

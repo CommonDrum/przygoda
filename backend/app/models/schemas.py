@@ -29,6 +29,8 @@ class ProjectUpdate(BaseModel):
     story_type: str | None = None
     hobby: str | None = None
     moral: str | None = None
+    llm_provider: str | None = None
+    image_provider: str | None = None
 
 
 class RegenerateRequest(BaseModel):

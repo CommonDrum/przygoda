@@ -116,6 +116,25 @@ export default function EditProjectModal({ project, onSave, onClose }: Props) {
             <input className="input-warm" value={form.moral} onChange={(e) => set("moral", e.target.value)} required />
           </div>
 
+          <div className="grid grid-cols-2 gap-3.5">
+            <div>
+              <label className="label-warm">LLM Provider</label>
+              <select className="input-warm" value={form.llm_provider || project.llm_provider} onChange={(e) => set("llm_provider", e.target.value)}>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="openai">OpenAI (GPT)</option>
+                <option value="google">Google (Gemini)</option>
+              </select>
+            </div>
+            <div>
+              <label className="label-warm">Image Provider</label>
+              <select className="input-warm" value={form.image_provider || project.image_provider} onChange={(e) => set("image_provider", e.target.value)}>
+                <option value="nano_banana">Nano Banana</option>
+                <option value="dalle">DALL-E 3</option>
+                <option value="google">Google (Gemini)</option>
+              </select>
+            </div>
+          </div>
+
           <div className="flex gap-3 pt-3">
             <button type="submit" disabled={saving} className="btn-primary flex-1">
               {saving ? "Zapisywanie..." : "Zapisz"}

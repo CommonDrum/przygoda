@@ -42,6 +42,8 @@ export interface ProjectCreateInput {
   story_type: string;
   hobby: string;
   moral: string;
+  llm_provider?: string;
+  image_provider?: string;
 }
 
 export type PageType = "cover" | "story" | "back";
