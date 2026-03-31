@@ -42,4 +42,5 @@ app.include_router(projects.router, prefix="/api", dependencies=[Depends(get_cur
 app.include_router(pages.router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(settings.router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(generation.router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(generation.ws_router)  # WS — no /api prefix, auth via token query param
 app.include_router(exports.router, prefix="/api", dependencies=[Depends(get_current_user)])

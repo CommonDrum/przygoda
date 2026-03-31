@@ -14,6 +14,7 @@ from ..services.story_service import (
 from ..services.ws_manager import ConnectionManager
 
 router = APIRouter(tags=["generation"])
+ws_router = APIRouter(tags=["websocket"])
 
 # Singleton — will be set from main.py
 ws_manager: ConnectionManager | None = None
@@ -95,7 +96,7 @@ async def api_regenerate_image(page_id: int, body: RegenerateRequest | None = No
         _handle_error(e)
 
 
-@router.websocket("/ws/generation/{project_id}")
+@ws_router.websocket("/ws/generation/{project_id}")
 async def generation_ws(websocket: WebSocket, project_id: int):
     token = websocket.query_params.get("token")
     if not token:
