@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Project, ProjectCreateInput } from "../lib/types";
 import { updateProject } from "../lib/api";
+import { useToast } from "../context/ToastContext";
 
 interface Props {
   project: Project;
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function EditProjectModal({ project, onSave, onClose }: Props) {
+  const { addToast } = useToast();
   const [form, setForm] = useState<ProjectCreateInput>({
     child_name: project.child_name,
     child_age: project.child_age,
@@ -32,14 +34,14 @@ export default function EditProjectModal({ project, onSave, onClose }: Props) {
     setSaving(true);
     updateProject(project.id, form)
       .then(onSave)
-      .catch((err) => alert("Błąd: " + err.message))
+      .catch((err) => addToast("Błąd: " + err.message, "error"))
       .finally(() => setSaving(false));
   };
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-bark-700/50 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={saving ? undefined : onClose}
     >
       <div
         className="card-storybook w-full max-w-lg max-h-[90vh] overflow-y-auto scroll-warm p-7 animate-enter"
@@ -118,7 +120,7 @@ export default function EditProjectModal({ project, onSave, onClose }: Props) {
             <button type="submit" disabled={saving} className="btn-primary flex-1">
               {saving ? "Zapisywanie..." : "Zapisz"}
             </button>
-            <button type="button" onClick={onClose} className="btn-secondary flex-1">
+            <button type="button" onClick={onClose} disabled={saving} className="btn-secondary flex-1">
               Anuluj
             </button>
           </div>

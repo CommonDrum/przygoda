@@ -63,6 +63,23 @@ async def api_generate_prompts(project_id: int):
 async def api_generate_images(project_id: int):
     if not ws_manager:
         raise HTTPException(500, "WebSocket manager not initialized")
+
+    from ..database import get_db
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT status FROM projects WHERE id = ?", (project_id,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(404, "Projekt nie znaleziony")
+        if row["status"] == "images_generating":
+            raise HTTPException(409, "Generowanie obrazków już trwa")
+        if row["status"] != "prompts_generated":
+            raise HTTPException(409, f"Nie można generować obrazków w statusie '{row['status']}'")
+    finally:
+        await db.close()
+
     asyncio.create_task(generate_images(project_id, ws_manager))
     return {"status": "started"}
 

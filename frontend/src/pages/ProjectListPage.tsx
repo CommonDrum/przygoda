@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Project } from "../lib/types";
 import { getProjects, deleteProject } from "../lib/api";
+import { useToast } from "../context/ToastContext";
 import StatusBadge from "../components/StatusBadge";
 
 export default function ProjectListPage() {
+  const { addToast } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -19,8 +21,13 @@ export default function ProjectListPage() {
   useEffect(load, []);
 
   const handleDelete = (id: number, name: string) => {
-    if (!confirm(`Usunąć projekt "${name}"?`)) return;
-    deleteProject(id).then(load);
+    if (!confirm(`Usunąć projekt "${name}"? Tego nie można cofnąć.`)) return;
+    deleteProject(id)
+      .then(() => {
+        setProjects((prev) => prev.filter((p) => p.id !== id));
+        addToast("Projekt usunięty", "success");
+      })
+      .catch(() => addToast("Błąd usuwania projektu", "error"));
   };
 
   if (loading) {

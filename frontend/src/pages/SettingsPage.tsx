@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AppSettings } from "../lib/types";
 import { getSettings, updateSettings, validateApiKey } from "../lib/api";
+import { useToast } from "../context/ToastContext";
 
 const defaultStoryPrompt = `Jesteś mistrzem opowieści tworzącym spersonalizowane książeczki dla dzieci.
 
@@ -147,6 +148,7 @@ export default function SettingsPage() {
     story_system_prompt: defaultStoryPrompt,
     image_system_prompt: defaultImagePrompt,
   });
+  const { addToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [validation, setValidation] = useState<
@@ -187,8 +189,11 @@ export default function SettingsPage() {
   const save = (partial: Partial<AppSettings>) => {
     setSaving(true);
     updateSettings(partial)
-      .then(setSettings)
-      .catch((e) => alert("Błąd zapisu: " + e.message))
+      .then((s) => {
+        setSettings(s);
+        addToast("Zapisano", "success");
+      })
+      .catch((e) => addToast("Błąd zapisu: " + e.message, "error"))
       .finally(() => setSaving(false));
   };
 

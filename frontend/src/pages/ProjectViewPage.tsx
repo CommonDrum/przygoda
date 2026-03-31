@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
+import axios from "axios";
 import type { Project, Page, WsMessage } from "../lib/types";
 import {
   getProject,
@@ -10,6 +11,8 @@ import {
   exportProject,
 } from "../lib/api";
 import { connectWebSocket } from "../lib/ws";
+import type { WsConnection, WsStatus } from "../lib/ws";
+import { useToast } from "../context/ToastContext";
 import StatusBadge from "../components/StatusBadge";
 import PageCard from "../components/PageCard";
 import EditProjectModal from "../components/EditProjectModal";
@@ -18,11 +21,13 @@ import RegenerateModal from "../components/RegenerateModal";
 export default function ProjectViewPage() {
   const { id } = useParams<{ id: string }>();
   const projectId = Number(id);
+  const { addToast } = useToast();
 
   const [project, setProject] = useState<Project | null>(null);
   const [pages, setPages] = useState<Page[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState<"zip" | "excel" | null>(null);
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [regenPage, setRegenPage] = useState<Page | null>(null);
@@ -33,7 +38,8 @@ export default function ProjectViewPage() {
   const [imageStatuses, setImageStatuses] = useState<
     Record<number, "generating" | "completed" | "failed">
   >({});
-  const wsRef = useRef<WebSocket | null>(null);
+  const [wsStatus, setWsStatus] = useState<WsStatus>("connected");
+  const wsRef = useRef<WsConnection | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -42,48 +48,53 @@ export default function ProjectViewPage() {
         setProject(proj);
         setPages(pgs);
       })
-      .catch((e) => console.error("Błąd:", e))
+      .catch(() => addToast("Nie udało się załadować projektu", "error"))
       .finally(() => setLoading(false));
-  }, [projectId]);
+  }, [projectId, addToast]);
 
   useEffect(() => {
     load();
     return () => wsRef.current?.close();
   }, [load]);
 
+  // WebSocket — connect once per projectId
   useEffect(() => {
-    if (!project) return;
+    if (!projectId) return;
 
-    const ws = connectWebSocket(projectId, (msg: WsMessage) => {
-      if (msg.type === "image_progress" && msg.page_number !== undefined) {
-        setImageStatuses((prev) => ({
-          ...prev,
-          [msg.page_number!]: msg.status as "generating" | "completed" | "failed",
-        }));
-        if (msg.status === "completed") {
-          if (msg.page_number === 0) {
-            getProject(projectId).then(setProject);
-          } else {
-            getPages(projectId).then(setPages);
+    const conn = connectWebSocket(
+      projectId,
+      (msg: WsMessage) => {
+        if (msg.type === "image_progress" && msg.page_number !== undefined) {
+          setImageStatuses((prev) => ({
+            ...prev,
+            [msg.page_number!]: msg.status as "generating" | "completed" | "failed",
+          }));
+          if (msg.status === "completed") {
+            if (msg.page_number === 0) {
+              getProject(projectId).then(setProject);
+            } else {
+              getPages(projectId).then(setPages);
+            }
           }
+        } else if (msg.type === "text_stream" && msg.chunk) {
+          setStreamingPhase(msg.phase || null);
+          setStreamingText((prev) => prev + msg.chunk);
+          requestAnimationFrame(() => {
+            if (streamRef.current) {
+              streamRef.current.scrollTop = streamRef.current.scrollHeight;
+            }
+          });
+        } else if (msg.type === "text_done") {
+          setStreamingText("");
+          setStreamingPhase(null);
         }
-      } else if (msg.type === "text_stream" && msg.chunk) {
-        setStreamingPhase(msg.phase || null);
-        setStreamingText((prev) => prev + msg.chunk);
-        requestAnimationFrame(() => {
-          if (streamRef.current) {
-            streamRef.current.scrollTop = streamRef.current.scrollHeight;
-          }
-        });
-      } else if (msg.type === "text_done") {
-        setStreamingText("");
-        setStreamingPhase(null);
-      }
-    });
-    wsRef.current = ws;
+      },
+      setWsStatus,
+    );
+    wsRef.current = conn;
 
-    return () => ws.close();
-  }, [project?.id, projectId]);
+    return () => conn.close();
+  }, [projectId]);
 
   useEffect(() => {
     const completedCount = Object.values(imageStatuses).filter(
@@ -101,8 +112,13 @@ export default function ProjectViewPage() {
       if (result && "id" in result) setProject(result);
       load();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Nieznany błąd";
-      alert("Błąd: " + msg);
+      let msg = "Nieznany błąd";
+      if (axios.isAxiosError(e)) {
+        msg = e.response?.data?.detail || e.message;
+      } else if (e instanceof Error) {
+        msg = e.message;
+      }
+      addToast(msg, "error");
     } finally {
       setActionLoading(false);
     }
@@ -114,9 +130,14 @@ export default function ProjectViewPage() {
   };
 
   const handleExport = (format: "zip" | "excel") => {
-    exportProject(projectId, format).then((path) => {
-      window.open(path, "_blank");
-    });
+    setExportLoading(format);
+    exportProject(projectId, format)
+      .then((path) => {
+        window.open(path, "_blank");
+        addToast("Eksport gotowy", "success");
+      })
+      .catch(() => addToast("Błąd eksportu", "error"))
+      .finally(() => setExportLoading(null));
   };
 
   if (loading || !project) {
@@ -130,10 +151,21 @@ export default function ProjectViewPage() {
   const completedImages = Object.values(imageStatuses).filter(
     (s) => s === "completed"
   ).length;
+  const failedImages = Object.values(imageStatuses).filter(
+    (s) => s === "failed"
+  ).length;
   const showProgress = project.status === "images_generating";
 
   return (
     <div className="animate-enter">
+      {/* Back link */}
+      <Link
+        to="/"
+        className="inline-flex items-center gap-1.5 text-sm font-semibold text-bark-300 hover:text-teal-500 transition-colors mb-5"
+      >
+        &larr; Projekty
+      </Link>
+
       {/* Header */}
       <div className="flex items-start justify-between mb-8">
         <div className="flex items-start gap-4">
@@ -203,7 +235,7 @@ export default function ProjectViewPage() {
                 Generowanie...
               </>
             ) : (
-              "Generuj prompty obrazków"
+              "Generuj opisy obrazków"
             )}
           </button>
         )}
@@ -224,11 +256,33 @@ export default function ProjectViewPage() {
         )}
         {(project.status === "review" || project.status === "exported") && (
           <>
-            <button onClick={() => handleExport("zip")} className="btn-amber">
-              Eksport ZIP
+            <button
+              onClick={() => handleExport("zip")}
+              disabled={exportLoading !== null}
+              className="btn-amber"
+            >
+              {exportLoading === "zip" ? (
+                <>
+                  <div className="spinner-warm" style={{ width: "1rem", height: "1rem", borderWidth: "2px", borderColor: "rgba(255,255,255,0.3)", borderTopColor: "white" }} />
+                  Eksport...
+                </>
+              ) : (
+                "Eksport ZIP"
+              )}
             </button>
-            <button onClick={() => handleExport("excel")} className="btn-amber">
-              Eksport Excel
+            <button
+              onClick={() => handleExport("excel")}
+              disabled={exportLoading !== null}
+              className="btn-amber"
+            >
+              {exportLoading === "excel" ? (
+                <>
+                  <div className="spinner-warm" style={{ width: "1rem", height: "1rem", borderWidth: "2px", borderColor: "rgba(255,255,255,0.3)", borderTopColor: "white" }} />
+                  Eksport...
+                </>
+              ) : (
+                "Eksport Excel"
+              )}
             </button>
           </>
         )}
@@ -243,7 +297,7 @@ export default function ProjectViewPage() {
               {streamingPhase === "story"
                 ? "Tkanie historii..."
                 : streamingPhase === "prompts"
-                  ? "Tworzenie promptów..."
+                  ? "Tworzenie opisów obrazków..."
                   : "Generowanie..."}
             </span>
           </div>
@@ -253,6 +307,25 @@ export default function ProjectViewPage() {
           >
             {streamingText || "Czekam na odpowiedź..."}
           </pre>
+        </div>
+      )}
+
+      {/* WebSocket status banners */}
+      {showProgress && wsStatus === "reconnecting" && (
+        <div className="mb-4 card-storybook p-4 border-l-4 border-l-amber-400 animate-enter">
+          <div className="flex items-center gap-2.5">
+            <div className="spinner-warm" style={{ width: "1rem", height: "1rem", borderWidth: "2px" }} />
+            <span className="text-sm font-semibold text-amber-500">
+              Utracono połączenie, ponawiam...
+            </span>
+          </div>
+        </div>
+      )}
+      {showProgress && wsStatus === "disconnected" && (
+        <div className="mb-4 card-storybook p-4 border-l-4 border-l-rose-400 animate-enter">
+          <span className="text-sm font-semibold text-rose-400">
+            Nie udało się połączyć. Odśwież stronę.
+          </span>
         </div>
       )}
 
@@ -276,9 +349,9 @@ export default function ProjectViewPage() {
               style={{ width: `${Math.round((completedImages / 18) * 100)}%` }}
             />
           </div>
-          {Object.values(imageStatuses).filter((s) => s === "failed").length > 0 && (
+          {failedImages > 0 && (
             <p className="text-xs text-red-500 mt-1.5">
-              Błędy: {Object.values(imageStatuses).filter((s) => s === "failed").length}
+              Błędy: {failedImages}
             </p>
           )}
         </div>
@@ -310,6 +383,7 @@ export default function ProjectViewPage() {
           onSave={(updated) => {
             setProject(updated);
             setShowEditModal(false);
+            addToast("Projekt zaktualizowany", "success");
           }}
           onClose={() => setShowEditModal(false)}
         />

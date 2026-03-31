@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ProjectCreateInput } from "../lib/types";
 import { createProject } from "../lib/api";
+import { useToast } from "../context/ToastContext";
 
 const defaults: ProjectCreateInput = {
   child_name: "",
@@ -19,6 +20,7 @@ const defaults: ProjectCreateInput = {
 
 export default function NewProjectPage() {
   const navigate = useNavigate();
+  const { addToast } = useToast();
   const [form, setForm] = useState<ProjectCreateInput>({ ...defaults });
   const [submitting, setSubmitting] = useState(false);
 
@@ -31,7 +33,7 @@ export default function NewProjectPage() {
     createProject(form)
       .then((p) => navigate(`/project/${p.id}`))
       .catch((err) => {
-        alert("Błąd tworzenia projektu: " + err.message);
+        addToast("Błąd tworzenia projektu: " + err.message, "error");
         setSubmitting(false);
       });
   };
