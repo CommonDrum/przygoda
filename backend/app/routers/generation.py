@@ -1,7 +1,10 @@
 import asyncio
+import logging
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from jose import JWTError
+
+logger = logging.getLogger(__name__)
 
 from ..auth import verify_token
 from ..models.schemas import ProjectResponse, PageResponse, RegenerateRequest
@@ -81,7 +84,13 @@ async def api_generate_images(project_id: int):
     finally:
         await db.close()
 
-    asyncio.create_task(generate_images(project_id, ws_manager))
+    async def _run():
+        try:
+            await generate_images(project_id, ws_manager)
+        except Exception:
+            logger.exception("generate_images task crashed for project %d", project_id)
+
+    asyncio.create_task(_run())
     return {"status": "started"}
 
 
