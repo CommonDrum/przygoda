@@ -12,7 +12,6 @@ import {
 import { connectWebSocket } from "../lib/ws";
 import StatusBadge from "../components/StatusBadge";
 import PageCard from "../components/PageCard";
-import ProgressOverlay from "../components/ProgressOverlay";
 import EditProjectModal from "../components/EditProjectModal";
 import RegenerateModal from "../components/RegenerateModal";
 
@@ -257,13 +256,32 @@ export default function ProjectViewPage() {
         </div>
       )}
 
-      {/* Progress overlay */}
+      {/* Inline progress bar */}
       {showProgress && (
-        <ProgressOverlay
-          total={18}
-          completed={completedImages}
-          statuses={imageStatuses}
-        />
+        <div className="mb-8 card-storybook p-5 animate-enter">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2.5">
+              <div className="spinner-warm" style={{ width: "1rem", height: "1rem", borderWidth: "2px" }} />
+              <span className="font-display font-bold text-bark-600">
+                Generowanie obrazków
+              </span>
+            </div>
+            <span className="text-sm text-bark-400 font-semibold">
+              {completedImages} / 18
+            </span>
+          </div>
+          <div className="w-full bg-cream-300/60 rounded-full h-2 overflow-hidden">
+            <div
+              className="bg-gradient-to-r from-teal-500 to-teal-600 h-2 rounded-full transition-all duration-500 ease-out"
+              style={{ width: `${Math.round((completedImages / 18) * 100)}%` }}
+            />
+          </div>
+          {Object.values(imageStatuses).filter((s) => s === "failed").length > 0 && (
+            <p className="text-xs text-red-500 mt-1.5">
+              Błędy: {Object.values(imageStatuses).filter((s) => s === "failed").length}
+            </p>
+          )}
+        </div>
       )}
 
       {/* Pages grid */}

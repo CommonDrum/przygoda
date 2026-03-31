@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AppSettings } from "../lib/types";
-import { getSettings, updateSettings } from "../lib/api";
+import { getSettings, updateSettings, validateApiKey } from "../lib/api";
 
 const defaultStoryPrompt = `Jesteś mistrzem opowieści tworzącym spersonalizowane książeczki dla dzieci.
 
@@ -70,6 +70,70 @@ CRITICAL RULES:
 - Specify shot type: establishing wide, medium, or close-up.
 - Include emotional state: expression of wonder, determination, etc.`;
 
+type ValidationState = {
+  loading: boolean;
+  result: { valid: boolean; error?: string } | null;
+};
+
+function ApiKeyField({
+  label,
+  placeholder,
+  value,
+  onChange,
+  provider,
+  validationState,
+  onTest,
+}: {
+  label: string;
+  placeholder?: string;
+  value: string;
+  onChange: (val: string) => void;
+  provider: string;
+  validationState: ValidationState;
+  onTest: (provider: string) => void;
+}) {
+  const hasSavedKey = value.includes("•");
+
+  return (
+    <div>
+      <label className="label-warm">{label}</label>
+      <div className="flex gap-2">
+        <input
+          type="password"
+          className="input-warm font-mono flex-1"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+        />
+        <button
+          type="button"
+          onClick={() => onTest(provider)}
+          disabled={validationState.loading}
+          className="px-3 py-1.5 text-sm font-semibold rounded-lg border border-bark-200 bg-white hover:bg-bark-50 text-bark-600 transition-colors disabled:opacity-50 whitespace-nowrap"
+        >
+          {validationState.loading ? "..." : "Testuj"}
+        </button>
+      </div>
+      <div className="flex items-center gap-2 mt-1 min-h-[1.25rem]">
+        {hasSavedKey && (
+          <span className="text-xs text-bark-400 font-mono">
+            {value.replace(/•+/, "•••")}
+          </span>
+        )}
+        {validationState.result && (
+          <span
+            className={`text-xs font-semibold ${validationState.result.valid ? "text-green-600" : "text-red-500"}`}
+          >
+            {validationState.result.valid
+              ? "Klucz działa"
+              : validationState.result.error || "Nieprawidłowy klucz"}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings>({
     anthropic_api_key: "",
@@ -85,6 +149,33 @@ export default function SettingsPage() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [validation, setValidation] = useState<
+    Record<string, ValidationState>
+  >({
+    anthropic: { loading: false, result: null },
+    openai: { loading: false, result: null },
+    nano_banana: { loading: false, result: null },
+    google: { loading: false, result: null },
+  });
+
+  const testKey = async (provider: string) => {
+    setValidation((v) => ({
+      ...v,
+      [provider]: { loading: true, result: null },
+    }));
+    try {
+      const result = await validateApiKey(provider);
+      setValidation((v) => ({ ...v, [provider]: { loading: false, result } }));
+    } catch {
+      setValidation((v) => ({
+        ...v,
+        [provider]: {
+          loading: false,
+          result: { valid: false, error: "Błąd połączenia" },
+        },
+      }));
+    }
+  };
 
   useEffect(() => {
     getSettings()
@@ -123,62 +214,52 @@ export default function SettingsPage() {
           <h2 className="font-display font-bold text-bark-600">Klucze API</h2>
         </div>
 
-        <div>
-          <label className="label-warm">Anthropic API Key</label>
-          <input
-            type="password"
-            className="input-warm font-mono"
-            value={settings.anthropic_api_key}
-            onChange={(e) =>
-              setSettings((s) => ({ ...s, anthropic_api_key: e.target.value }))
-            }
-            placeholder="sk-ant-..."
-          />
-        </div>
+        <ApiKeyField
+          label="Anthropic API Key"
+          placeholder="sk-ant-..."
+          value={settings.anthropic_api_key}
+          onChange={(val) =>
+            setSettings((s) => ({ ...s, anthropic_api_key: val }))
+          }
+          provider="anthropic"
+          validationState={validation.anthropic}
+          onTest={testKey}
+        />
 
-        <div>
-          <label className="label-warm">OpenAI API Key</label>
-          <input
-            type="password"
-            className="input-warm font-mono"
-            value={settings.openai_api_key}
-            onChange={(e) =>
-              setSettings((s) => ({ ...s, openai_api_key: e.target.value }))
-            }
-            placeholder="sk-..."
-          />
-        </div>
+        <ApiKeyField
+          label="OpenAI API Key"
+          placeholder="sk-..."
+          value={settings.openai_api_key}
+          onChange={(val) =>
+            setSettings((s) => ({ ...s, openai_api_key: val }))
+          }
+          provider="openai"
+          validationState={validation.openai}
+          onTest={testKey}
+        />
 
-        <div>
-          <label className="label-warm">Nano Banana API Key</label>
-          <input
-            type="password"
-            className="input-warm font-mono"
-            value={settings.nano_banana_api_key}
-            onChange={(e) =>
-              setSettings((s) => ({
-                ...s,
-                nano_banana_api_key: e.target.value,
-              }))
-            }
-          />
-        </div>
+        <ApiKeyField
+          label="Nano Banana API Key"
+          value={settings.nano_banana_api_key}
+          onChange={(val) =>
+            setSettings((s) => ({ ...s, nano_banana_api_key: val }))
+          }
+          provider="nano_banana"
+          validationState={validation.nano_banana}
+          onTest={testKey}
+        />
 
-        <div>
-          <label className="label-warm">Google API Key (Gemini)</label>
-          <input
-            type="password"
-            className="input-warm font-mono"
-            value={settings.google_api_key}
-            onChange={(e) =>
-              setSettings((s) => ({
-                ...s,
-                google_api_key: e.target.value,
-              }))
-            }
-            placeholder="AIzaSy..."
-          />
-        </div>
+        <ApiKeyField
+          label="Google API Key (Gemini)"
+          placeholder="AIzaSy..."
+          value={settings.google_api_key}
+          onChange={(val) =>
+            setSettings((s) => ({ ...s, google_api_key: val }))
+          }
+          provider="google"
+          validationState={validation.google}
+          onTest={testKey}
+        />
 
         <button
           onClick={() =>

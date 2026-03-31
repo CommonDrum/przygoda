@@ -124,3 +124,10 @@ export async function updateSettings(
   const { data } = await api.put("/settings", settings);
   return data;
 }
+
+export async function validateApiKey(
+  provider: string
+): Promise<{ valid: boolean; error?: string }> {
+  const { data } = await api.post("/settings/validate-key", { provider });
+  return data;
+}

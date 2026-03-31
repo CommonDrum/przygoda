@@ -1,7 +1,16 @@
+import anthropic
+import httpx
+import openai
 from fastapi import APIRouter
+from google import genai
 
 from ..database import get_db
-from ..models.schemas import SettingsUpdate, SettingsResponse
+from ..models.schemas import (
+    SettingsUpdate,
+    SettingsResponse,
+    ValidateKeyRequest,
+    ValidateKeyResponse,
+)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -26,6 +35,20 @@ DEFAULTS = {
     "image_size": "1K",
 }
 
+PROVIDER_KEY_MAP = {
+    "anthropic": "anthropic_api_key",
+    "openai": "openai_api_key",
+    "nano_banana": "nano_banana_api_key",
+    "google": "google_api_key",
+}
+
+
+def _mask_key(val: str) -> str:
+    """Show first 5 chars, mask the rest."""
+    if len(val) > 5:
+        return val[:5] + "•" * (len(val) - 5)
+    return val
+
 
 @router.get("", response_model=SettingsResponse)
 async def get_settings():
@@ -38,10 +61,9 @@ async def get_settings():
             )
             row = await cursor.fetchone()
             if row:
-                # Mask API keys — send only last 4 chars
                 val = row["value"]
-                if key.endswith("_api_key") and len(val) > 4:
-                    val = "•" * (len(val) - 4) + val[-4:]
+                if key.endswith("_api_key") and val:
+                    val = _mask_key(val)
                 result[key] = val
             else:
                 result[key] = DEFAULTS.get(key, "")
@@ -77,14 +99,61 @@ async def update_settings(data: SettingsUpdate):
             row = await cursor.fetchone()
             if row:
                 val = row["value"]
-                if key.endswith("_api_key") and len(val) > 4:
-                    val = "•" * (len(val) - 4) + val[-4:]
+                if key.endswith("_api_key") and val:
+                    val = _mask_key(val)
                 result[key] = val
             else:
                 result[key] = DEFAULTS.get(key, "")
         return SettingsResponse(**result)
     finally:
         await db.close()
+
+
+@router.post("/validate-key", response_model=ValidateKeyResponse)
+async def validate_key(data: ValidateKeyRequest):
+    """Test if an API key works by making a minimal API call."""
+    db_key = PROVIDER_KEY_MAP[data.provider]
+    api_key = await get_setting_value(db_key)
+    if not api_key:
+        return ValidateKeyResponse(valid=False, error="Klucz API nie jest ustawiony")
+
+    try:
+        if data.provider == "anthropic":
+            client = anthropic.AsyncAnthropic(api_key=api_key)
+            await client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1,
+                messages=[{"role": "user", "content": "hi"}],
+            )
+        elif data.provider == "openai":
+            client = openai.AsyncOpenAI(api_key=api_key)
+            await client.models.list()
+        elif data.provider == "google":
+            client = genai.Client(api_key=api_key)
+            await client.aio.models.get(model="gemini-2.0-flash")
+        elif data.provider == "nano_banana":
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    "https://api.nanobanana.com/v1/generate",
+                    json={"prompt": "test", "aspect_ratio": "1:1"},
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                # 401/403 = bad key, other errors might be OK (e.g. 400 = key works but bad request)
+                if resp.status_code in (401, 403):
+                    return ValidateKeyResponse(
+                        valid=False, error="Nieprawidłowy klucz API"
+                    )
+
+        return ValidateKeyResponse(valid=True)
+    except anthropic.AuthenticationError:
+        return ValidateKeyResponse(valid=False, error="Nieprawidłowy klucz API")
+    except openai.AuthenticationError:
+        return ValidateKeyResponse(valid=False, error="Nieprawidłowy klucz API")
+    except Exception as e:
+        msg = str(e)
+        if "api_key" in msg.lower() or "auth" in msg.lower() or "401" in msg or "403" in msg:
+            return ValidateKeyResponse(valid=False, error="Nieprawidłowy klucz API")
+        return ValidateKeyResponse(valid=False, error=f"Błąd połączenia: {msg[:200]}")
 
 
 async def get_setting_value(key: str) -> str | None:

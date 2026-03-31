@@ -126,3 +126,12 @@ class SettingsResponse(BaseModel):
     image_system_prompt: str = ""
     image_aspect_ratio: str = "1:1"
     image_size: str = "1K"
+
+
+class ValidateKeyRequest(BaseModel):
+    provider: str = Field(pattern=r"^(anthropic|openai|nano_banana|google)$")
+
+
+class ValidateKeyResponse(BaseModel):
+    valid: bool
+    error: str | None = None
