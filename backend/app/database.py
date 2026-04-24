@@ -122,10 +122,50 @@ async def init_db():
             except Exception:
                 pass  # Column already exists
 
+        # Rebuild image_versions if an old schema left page_id NOT NULL
+        # (reference-kind rows don't have a page_id, so inserts would fail).
+        await _ensure_image_versions_nullable_page_id(db)
+
         # Seed prompts library from legacy settings if empty
         await _seed_prompts_from_settings(db)
     finally:
         await db.close()
+
+
+async def _ensure_image_versions_nullable_page_id(db):
+    """SQLite can't ALTER COLUMN to drop NOT NULL, so rebuild the table
+    when a legacy DB has `page_id INTEGER NOT NULL`. Preserves all existing
+    rows."""
+    cursor = await db.execute("PRAGMA table_info(image_versions)")
+    cols = await cursor.fetchall()
+    page_id_notnull = any(
+        c["name"] == "page_id" and c["notnull"] == 1 for c in cols
+    )
+    if not page_id_notnull:
+        return
+
+    await db.executescript("""
+        CREATE TABLE image_versions_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            page_id INTEGER REFERENCES pages(id) ON DELETE CASCADE,
+            project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL DEFAULT 'page',
+            image_path TEXT NOT NULL,
+            prompt_used TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            version_number INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO image_versions_new
+            (id, page_id, project_id, kind, image_path,
+             prompt_used, provider, version_number, created_at)
+        SELECT id, page_id, project_id, kind, image_path,
+               prompt_used, provider, version_number, created_at
+        FROM image_versions;
+        DROP TABLE image_versions;
+        ALTER TABLE image_versions_new RENAME TO image_versions;
+    """)
+    await db.commit()
 
 
 async def _seed_prompts_from_settings(db):
