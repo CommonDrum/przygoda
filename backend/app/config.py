@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = ""
     LLM_PROVIDER: str = "anthropic"
     IMAGE_PROVIDER: str = "nano_banana"
-    IMAGE_CONCURRENCY: int = 5
+    IMAGE_CONCURRENCY: int = 3  # max parallel image gen requests (2–3 to stay under typical provider RPM)
     APP_USERNAME: str = "admin"
     APP_PASSWORD_HASH: str = ""
     JWT_SECRET_KEY: str = "change-me-in-production"

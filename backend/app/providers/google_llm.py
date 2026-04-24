@@ -5,6 +5,7 @@ from google.genai import types
 
 from .base import LLMProvider
 from .catalog import default_llm_model
+from .retry import with_retry, stream_with_retry
 from ..config import settings
 from ..routers.settings import get_setting_value
 
@@ -21,30 +22,39 @@ class GoogleLLM(LLMProvider):
 
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
         client = await self._get_client()
-        response = await client.aio.models.generate_content(
-            model=self.model,
-            contents=user_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                max_output_tokens=8192,
-            ),
-        )
-        if not response.text:
-            raise ValueError("Google returned empty response")
-        return response.text
+
+        async def _call():
+            response = await client.aio.models.generate_content(
+                model=self.model,
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    max_output_tokens=8192,
+                ),
+            )
+            if not response.text:
+                raise ValueError("Google returned empty response")
+            return response.text
+
+        return await with_retry(_call, label=f"google:{self.model}")
 
     async def generate_stream(
         self, system_prompt: str, user_prompt: str
     ) -> AsyncIterator[str]:
         client = await self._get_client()
-        stream = await client.aio.models.generate_content_stream(
-            model=self.model,
-            contents=user_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                max_output_tokens=8192,
-            ),
-        )
-        async for chunk in stream:
-            if chunk.text:
-                yield chunk.text
+
+        async def _stream():
+            stream = await client.aio.models.generate_content_stream(
+                model=self.model,
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    max_output_tokens=8192,
+                ),
+            )
+            async for chunk in stream:
+                if chunk.text:
+                    yield chunk.text
+
+        async for chunk in stream_with_retry(_stream, label=f"google-stream:{self.model}"):
+            yield chunk

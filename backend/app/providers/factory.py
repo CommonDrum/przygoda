@@ -21,6 +21,12 @@ async def get_llm_provider(
 ) -> LLMProvider:
     provider = override or await get_setting_value("default_llm_provider") or settings.LLM_PROVIDER
 
+    match provider:
+        case "anthropic" | "openai" | "google":
+            pass  # valid
+        case _:
+            raise ValueError(f"Unknown LLM provider: {provider}")
+
     if model_override and is_valid_llm_model(provider, model_override):
         model = model_override
     else:
@@ -33,8 +39,7 @@ async def get_llm_provider(
             return OpenAILLM(model=model)
         case "google":
             return GoogleLLM(model=model)
-        case _:
-            raise ValueError(f"Unknown LLM provider: {provider}")
+    raise ValueError(f"Unknown LLM provider: {provider}")  # unreachable
 
 
 async def get_image_provider(
@@ -42,6 +47,12 @@ async def get_image_provider(
     model_override: str | None = None,
 ) -> ImageProvider:
     provider = override or await get_setting_value("default_image_provider") or settings.IMAGE_PROVIDER
+
+    match provider:
+        case "nano_banana" | "dalle" | "google":
+            pass  # valid
+        case _:
+            raise ValueError(f"Unknown image provider: {provider}")
 
     if model_override and is_valid_image_model(provider, model_override):
         model = model_override
@@ -55,5 +66,4 @@ async def get_image_provider(
             return DalleImage(model=model)
         case "google":
             return GoogleImage(model=model)
-        case _:
-            raise ValueError(f"Unknown image provider: {provider}")
+    raise ValueError(f"Unknown image provider: {provider}")  # unreachable

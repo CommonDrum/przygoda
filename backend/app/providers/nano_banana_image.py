@@ -3,6 +3,7 @@ import base64
 import httpx
 
 from .base import ImageProvider
+from .retry import with_retry
 from ..config import settings
 from ..routers.settings import get_setting_value
 
@@ -34,19 +35,22 @@ class NanoBananaImage(ImageProvider):
             b64 = base64.b64encode(last).decode()
             payload["reference_image"] = f"data:image/png;base64,{b64}"
 
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                self.API_URL,
-                json=payload,
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        async def _call() -> bytes:
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(
+                    self.API_URL,
+                    json=payload,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                resp.raise_for_status()
+                data = resp.json()
 
-            image_url = data.get("image_url") or data.get("url")
-            if not image_url:
-                raise ValueError(f"No image URL in response: {data}")
+                image_url = data.get("image_url") or data.get("url")
+                if not image_url:
+                    raise ValueError(f"No image URL in response: {data}")
 
-            img_resp = await client.get(image_url)
-            img_resp.raise_for_status()
-            return img_resp.content
+                img_resp = await client.get(image_url)
+                img_resp.raise_for_status()
+                return img_resp.content
+
+        return await with_retry(_call, label="nano_banana")

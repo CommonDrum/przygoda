@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import random
 
 from ..database import get_db
 
@@ -524,6 +525,9 @@ async def generate_images(project_id: int, ws_manager: ConnectionManager):
                 "page_id": page_id,
                 "status": "generating",
             })
+
+            # Small jitter so N parallel calls don't hit the API in the exact same tick.
+            await asyncio.sleep(random.uniform(0, 0.2))
 
             try:
                 image_bytes = await image_provider.generate_image(

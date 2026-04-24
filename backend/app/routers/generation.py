@@ -1,15 +1,19 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from jose import JWTError
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 logger = logging.getLogger(__name__)
 
 from ..auth import verify_token
 from ..models.schemas import ProjectResponse, PageResponse, RegenerateRequest
+from ..services.locks import (
+    ProjectBusyError,
+    is_project_busy,
+    page_busy,
+    project_busy,
+)
 from ..services.story_service import (
     generate_reference,
     regenerate_reference,
@@ -23,8 +27,6 @@ from ..services.ws_manager import ConnectionManager
 
 router = APIRouter(tags=["generation"])
 ws_router = APIRouter(tags=["websocket"])
-
-limiter = Limiter(key_func=get_remote_address)
 
 # Singleton — will be set from main.py
 ws_manager: ConnectionManager | None = None
@@ -44,16 +46,22 @@ def _handle_error(e: Exception):
     raise HTTPException(500, msg)
 
 
+def _busy_409() -> HTTPException:
+    return HTTPException(409, "Dla tego projektu już trwa operacja")
+
+
 # ---- Reference image stage ----
 
 @router.post(
     "/projects/{project_id}/generate-reference",
     response_model=ProjectResponse,
 )
-@limiter.limit("3/minute")
-async def api_generate_reference(project_id: int, request: Request):
+async def api_generate_reference(project_id: int):
     try:
-        return await generate_reference(project_id, ws_manager=ws_manager)
+        async with project_busy(project_id):
+            return await generate_reference(project_id, ws_manager=ws_manager)
+    except ProjectBusyError:
+        raise _busy_409()
     except HTTPException:
         raise
     except Exception as e:
@@ -64,15 +72,17 @@ async def api_generate_reference(project_id: int, request: Request):
     "/projects/{project_id}/regenerate-reference",
     response_model=ProjectResponse,
 )
-@limiter.limit("6/minute")
 async def api_regenerate_reference(
-    project_id: int, request: Request, body: RegenerateRequest | None = None,
+    project_id: int, body: RegenerateRequest | None = None,
 ):
     try:
-        return await regenerate_reference(
-            project_id, ws_manager=ws_manager,
-            new_prompt=(body.prompt if body else None),
-        )
+        async with project_busy(project_id):
+            return await regenerate_reference(
+                project_id, ws_manager=ws_manager,
+                new_prompt=(body.prompt if body else None),
+            )
+    except ProjectBusyError:
+        raise _busy_409()
     except HTTPException:
         raise
     except Exception as e:
@@ -83,10 +93,12 @@ async def api_regenerate_reference(
     "/projects/{project_id}/approve-reference",
     response_model=ProjectResponse,
 )
-@limiter.limit("10/minute")
-async def api_approve_reference(project_id: int, request: Request):
+async def api_approve_reference(project_id: int):
     try:
-        return await approve_reference(project_id, ws_manager=ws_manager)
+        async with project_busy(project_id):
+            return await approve_reference(project_id, ws_manager=ws_manager)
+    except ProjectBusyError:
+        raise _busy_409()
     except HTTPException:
         raise
     except Exception as e:
@@ -99,10 +111,12 @@ async def api_approve_reference(project_id: int, request: Request):
     "/projects/{project_id}/generate-story",
     response_model=ProjectResponse,
 )
-@limiter.limit("3/minute")
-async def api_generate_story(project_id: int, request: Request):
+async def api_generate_story(project_id: int):
     try:
-        return await generate_story(project_id, ws_manager=ws_manager)
+        async with project_busy(project_id):
+            return await generate_story(project_id, ws_manager=ws_manager)
+    except ProjectBusyError:
+        raise _busy_409()
     except HTTPException:
         raise
     except Exception as e:
@@ -113,10 +127,12 @@ async def api_generate_story(project_id: int, request: Request):
     "/projects/{project_id}/generate-prompts",
     response_model=ProjectResponse,
 )
-@limiter.limit("3/minute")
-async def api_generate_prompts(project_id: int, request: Request):
+async def api_generate_prompts(project_id: int):
     try:
-        return await generate_page_prompts(project_id, ws_manager=ws_manager)
+        async with project_busy(project_id):
+            return await generate_page_prompts(project_id, ws_manager=ws_manager)
+    except ProjectBusyError:
+        raise _busy_409()
     except HTTPException:
         raise
     except Exception as e:
@@ -126,8 +142,7 @@ async def api_generate_prompts(project_id: int, request: Request):
 # ---- Page images ----
 
 @router.post("/projects/{project_id}/generate-images", status_code=202)
-@limiter.limit("2/minute")
-async def api_generate_images(project_id: int, request: Request):
+async def api_generate_images(project_id: int):
     if not ws_manager:
         raise HTTPException(500, "WebSocket manager not initialized")
 
@@ -147,9 +162,17 @@ async def api_generate_images(project_id: int, request: Request):
     finally:
         await db.close()
 
+    # Pre-flight check — the lock itself is taken inside the task (because the
+    # work is fire-and-forget and outlives this request).
+    if is_project_busy(project_id):
+        raise _busy_409()
+
     async def _run():
         try:
-            await generate_images(project_id, ws_manager)
+            async with project_busy(project_id):
+                await generate_images(project_id, ws_manager)
+        except ProjectBusyError:
+            pass  # lost the race with another task — fine
         except Exception:
             logger.exception("generate_images task crashed for project %d", project_id)
 
@@ -158,13 +181,15 @@ async def api_generate_images(project_id: int, request: Request):
 
 
 @router.post("/pages/{page_id}/regenerate-image", response_model=PageResponse)
-@limiter.limit("6/minute")
 async def api_regenerate_image(
-    page_id: int, request: Request, body: RegenerateRequest | None = None,
+    page_id: int, body: RegenerateRequest | None = None,
 ):
     try:
-        prompt = body.prompt if body else None
-        return await regenerate_single_image(page_id, prompt=prompt)
+        async with page_busy(page_id):
+            prompt = body.prompt if body else None
+            return await regenerate_single_image(page_id, prompt=prompt)
+    except ProjectBusyError:
+        raise HTTPException(409, "Ta strona jest w trakcie regeneracji")
     except HTTPException:
         raise
     except Exception as e:

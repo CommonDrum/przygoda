@@ -3,6 +3,7 @@ import openai
 
 from .base import ImageProvider
 from .catalog import default_image_model
+from .retry import with_retry
 from ..config import settings
 from ..routers.settings import get_setting_value
 
@@ -42,8 +43,6 @@ class DalleImage(ImageProvider):
         size = self.ASPECT_TO_SIZE.get(aspect_ratio, "1024x1024")
 
         client = openai.AsyncOpenAI(api_key=api_key)
-        # gpt-image-* returns base64 by default; dall-e-3 returns a URL.
-        # `response_format="url"` forces URL response for both families.
         kwargs: dict = {
             "model": self.model,
             "prompt": prompt,
@@ -52,18 +51,22 @@ class DalleImage(ImageProvider):
         }
         if self.model.startswith("dall-e"):
             kwargs["quality"] = "standard"
-        response = await client.images.generate(**kwargs)
-        datum = response.data[0]
 
-        if getattr(datum, "b64_json", None):
-            import base64
-            return base64.b64decode(datum.b64_json)
+        async def _call() -> bytes:
+            response = await client.images.generate(**kwargs)
+            datum = response.data[0]
 
-        image_url = getattr(datum, "url", None)
-        if not image_url:
-            raise ValueError("OpenAI image response missing both url and b64_json")
+            if getattr(datum, "b64_json", None):
+                import base64
+                return base64.b64decode(datum.b64_json)
 
-        async with httpx.AsyncClient(timeout=60) as http:
-            img_resp = await http.get(image_url)
-            img_resp.raise_for_status()
-            return img_resp.content
+            image_url = getattr(datum, "url", None)
+            if not image_url:
+                raise ValueError("OpenAI image response missing both url and b64_json")
+
+            async with httpx.AsyncClient(timeout=60) as http:
+                img_resp = await http.get(image_url)
+                img_resp.raise_for_status()
+                return img_resp.content
+
+        return await with_retry(_call, label=f"dalle:{self.model}")

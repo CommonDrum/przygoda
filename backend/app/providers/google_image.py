@@ -3,6 +3,7 @@ from google.genai import types
 
 from .base import ImageProvider
 from .catalog import default_image_model
+from .retry import with_retry
 from ..config import settings
 from ..routers.settings import get_setting_value
 
@@ -37,22 +38,25 @@ class GoogleImage(ImageProvider):
             )
         contents.append(prompt)
 
-        response = await client.aio.models.generate_content(
-            model=self.model,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                image_config=types.ImageConfig(
-                    aspect_ratio=aspect_ratio,
-                    image_size=image_size,
+        async def _call() -> bytes:
+            response = await client.aio.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    image_config=types.ImageConfig(
+                        aspect_ratio=aspect_ratio,
+                        image_size=image_size,
+                    ),
                 ),
-            ),
-        )
+            )
 
-        image_parts = [
-            part for part in response.candidates[0].content.parts
-            if part.inline_data and part.inline_data.mime_type.startswith("image/")
-        ]
-        if not image_parts:
-            raise ValueError("Google returned no image in response")
+            image_parts = [
+                part for part in response.candidates[0].content.parts
+                if part.inline_data and part.inline_data.mime_type.startswith("image/")
+            ]
+            if not image_parts:
+                raise ValueError("Google returned no image in response")
 
-        return image_parts[0].inline_data.data
+            return image_parts[0].inline_data.data
+
+        return await with_retry(_call, label=f"google-image:{self.model}")

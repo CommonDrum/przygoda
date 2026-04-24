@@ -3,9 +3,6 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
-from slowapi import _rate_limit_exceeded_handler
 
 from .auth import get_current_user
 from .config import settings as app_settings, STATIC_DIR, UPLOADS_DIR, EXPORTS_DIR
@@ -29,11 +26,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Przygoda", lifespan=lifespan)
-
-# Rate limiter — shared Limiter instance lives in generation.py
-app.state.limiter = generation.limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
