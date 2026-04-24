@@ -33,6 +33,34 @@ STATUS_REVIEW = "review"
 STATUS_EXPORTED = "exported"
 
 
+def _load_image_bytes(static_url: str | None) -> bytes | None:
+    """Resolve a /static/... URL to absolute path and read bytes, or None."""
+    if not static_url:
+        return None
+    abs_path = str(STATIC_DIR / static_url.removeprefix("/static/"))
+    if not os.path.exists(abs_path):
+        return None
+    with open(abs_path, "rb") as f:
+        return f.read()
+
+
+def _build_reference_images(project: dict, include_character: bool) -> list[bytes]:
+    """Build the ordered list of reference images passed to the image provider.
+
+    Order matters for providers that can only use one — character ref last so
+    it wins (see NanoBananaImage.generate_image).
+    """
+    images: list[bytes] = []
+    style_guide = _load_image_bytes(project.get("style_guide_image_path"))
+    if style_guide:
+        images.append(style_guide)
+    if include_character:
+        character = _load_image_bytes(project.get("reference_image_path"))
+        if character:
+            images.append(character)
+    return images
+
+
 async def _get_project(project_id: int) -> dict:
     db = await get_db()
     try:
@@ -148,7 +176,7 @@ async def generate_reference(project_id: int, ws_manager: ConnectionManager | No
         system_prompt = build_reference_system_prompt(project, custom_prompt)
         user_prompt = build_reference_user_prompt(project)
 
-        llm = await get_llm_provider(project.get("llm_provider"))
+        llm = await get_llm_provider(project.get("llm_provider"), project.get("llm_model"))
 
         def _parse(raw: str) -> str:
             # Take the first non-empty block if LLM added separators anyway.
@@ -167,7 +195,7 @@ async def generate_reference(project_id: int, ws_manager: ConnectionManager | No
         )
 
         # Generate the actual image
-        image_provider = await get_image_provider(project.get("image_provider"))
+        image_provider = await get_image_provider(project.get("image_provider"), project.get("image_model"))
         aspect_ratio = await get_setting_value("image_aspect_ratio") or "1:1"
         image_size = await get_setting_value("image_size") or "1K"
 
@@ -183,7 +211,9 @@ async def generate_reference(project_id: int, ws_manager: ConnectionManager | No
             })
 
         image_bytes = await image_provider.generate_image(
-            ref_prompt, aspect_ratio=aspect_ratio, image_size=image_size,
+            ref_prompt,
+            reference_images=_build_reference_images(project, include_character=False),
+            aspect_ratio=aspect_ratio, image_size=image_size,
         )
 
         filename = f"reference_v{new_version}.png"
@@ -210,6 +240,7 @@ async def generate_reference(project_id: int, ws_manager: ConnectionManager | No
             reference_image_prompt=ref_prompt,
             reference_image_path=image_path,
             reference_image_version=new_version,
+            reference_image_is_custom=0,
         )
         await _broadcast_status(ws_manager, project_id, STATUS_REF_REVIEW)
         if ws_manager:
@@ -242,7 +273,7 @@ async def regenerate_reference(project_id: int, ws_manager: ConnectionManager | 
     if not ref_prompt:
         raise ValueError("Brak promptu referencyjnego do regeneracji")
 
-    image_provider = await get_image_provider(project.get("image_provider"))
+    image_provider = await get_image_provider(project.get("image_provider"), project.get("image_model"))
     aspect_ratio = await get_setting_value("image_aspect_ratio") or "1:1"
     image_size = await get_setting_value("image_size") or "1K"
 
@@ -259,7 +290,9 @@ async def regenerate_reference(project_id: int, ws_manager: ConnectionManager | 
         })
 
     image_bytes = await image_provider.generate_image(
-        ref_prompt, aspect_ratio=aspect_ratio, image_size=image_size,
+        ref_prompt,
+        reference_images=_build_reference_images(project, include_character=False),
+        aspect_ratio=aspect_ratio, image_size=image_size,
     )
     filename = f"reference_v{new_version}.png"
     filepath = os.path.join(upload_dir, filename)
@@ -285,6 +318,7 @@ async def regenerate_reference(project_id: int, ws_manager: ConnectionManager | 
         reference_image_prompt=ref_prompt,
         reference_image_path=image_path,
         reference_image_version=new_version,
+        reference_image_is_custom=0,
     )
 
     if ws_manager:
@@ -329,7 +363,7 @@ async def generate_story(project_id: int, ws_manager: ConnectionManager | None =
         system_prompt = build_story_system_prompt(project, custom_prompt)
         user_prompt = build_story_user_prompt(project)
 
-        llm = await get_llm_provider(project.get("llm_provider"))
+        llm = await get_llm_provider(project.get("llm_provider"), project.get("llm_model"))
 
         def _parse(raw: str):
             return [s.strip() for s in raw.split(SEPARATOR) if s.strip()]
@@ -397,7 +431,7 @@ async def generate_page_prompts(project_id: int, ws_manager: ConnectionManager |
             project, project["raw_story"], project.get("reference_image_prompt"),
         )
 
-        llm = await get_llm_provider(project.get("llm_provider"))
+        llm = await get_llm_provider(project.get("llm_provider"), project.get("llm_model"))
 
         def _parse(raw: str):
             return [p.strip() for p in raw.split(SEPARATOR) if p.strip()]
@@ -461,7 +495,7 @@ async def generate_images(project_id: int, ws_manager: ConnectionManager):
     finally:
         await db.close()
 
-    image_provider = await get_image_provider(project.get("image_provider"))
+    image_provider = await get_image_provider(project.get("image_provider"), project.get("image_model"))
     semaphore = asyncio.Semaphore(settings.IMAGE_CONCURRENCY)
     completed_count = 0
     failed_count = 0
@@ -472,14 +506,8 @@ async def generate_images(project_id: int, ws_manager: ConnectionManager):
     upload_dir = str(UPLOADS_DIR / str(project_id))
     os.makedirs(upload_dir, exist_ok=True)
 
-    # Load approved reference image bytes once
-    reference_bytes: bytes | None = None
-    ref_path = project.get("reference_image_path")
-    if ref_path:
-        abs_ref = str(STATIC_DIR / ref_path.removeprefix("/static/"))
-        if os.path.exists(abs_ref):
-            with open(abs_ref, "rb") as f:
-                reference_bytes = f.read()
+    # Load style guide + character reference once
+    reference_images = _build_reference_images(project, include_character=True)
 
     async def generate_one(page: dict):
         nonlocal completed_count, failed_count
@@ -499,7 +527,8 @@ async def generate_images(project_id: int, ws_manager: ConnectionManager):
 
             try:
                 image_bytes = await image_provider.generate_image(
-                    page["image_prompt"], reference_bytes,
+                    page["image_prompt"],
+                    reference_images=reference_images,
                     aspect_ratio=aspect_ratio, image_size=image_size,
                 )
 
@@ -581,24 +610,19 @@ async def regenerate_single_image(page_id: int, prompt: str | None = None) -> di
         await db.close()
 
     project = await _get_project(page["project_id"])
-    image_provider = await get_image_provider(project.get("image_provider"))
+    image_provider = await get_image_provider(project.get("image_provider"), project.get("image_model"))
 
     if not page.get("image_prompt"):
         raise ValueError("No image prompt for this page")
 
-    reference_bytes: bytes | None = None
-    ref_path = project.get("reference_image_path")
-    if ref_path:
-        abs_ref = str(STATIC_DIR / ref_path.removeprefix("/static/"))
-        if os.path.exists(abs_ref):
-            with open(abs_ref, "rb") as f:
-                reference_bytes = f.read()
+    reference_images = _build_reference_images(project, include_character=True)
 
     aspect_ratio = await get_setting_value("image_aspect_ratio") or "1:1"
     image_size = await get_setting_value("image_size") or "1K"
 
     image_bytes = await image_provider.generate_image(
-        page["image_prompt"], reference_bytes,
+        page["image_prompt"],
+        reference_images=reference_images,
         aspect_ratio=aspect_ratio, image_size=image_size,
     )
 

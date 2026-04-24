@@ -72,16 +72,17 @@ export default function PageCard({
             <button
               onClick={() => onRegenerate(page.id)}
               className="flex-1 text-xs bg-teal-500/8 text-teal-600 hover:bg-teal-500/15 py-1.5 rounded-lg font-semibold transition-colors duration-200"
+              title="Edytuj tekst, prompt lub zobacz historię"
             >
-              Regeneruj
+              Edytuj
             </button>
             {showHistory && onShowHistory && page.version > 0 && (
               <button
                 onClick={() => onShowHistory(page.id)}
-                title="Historia wersji"
+                title="Szybki podgląd historii"
                 className="px-2.5 text-xs bg-bark-200/40 text-bark-500 hover:bg-bark-200/60 py-1.5 rounded-lg font-semibold transition-colors duration-200"
               >
-                Historia ({page.version})
+                v{page.version}
               </button>
             )}
           </div>

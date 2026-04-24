@@ -4,12 +4,14 @@ from google import genai
 from google.genai import types
 
 from .base import LLMProvider
+from .catalog import default_llm_model
 from ..config import settings
 from ..routers.settings import get_setting_value
 
 
 class GoogleLLM(LLMProvider):
-    MODEL = "gemini-3-flash-preview"
+    def __init__(self, model: str | None = None):
+        self.model = model or default_llm_model("google")
 
     async def _get_client(self):
         api_key = await get_setting_value("google_api_key") or settings.GOOGLE_API_KEY
@@ -20,7 +22,7 @@ class GoogleLLM(LLMProvider):
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
         client = await self._get_client()
         response = await client.aio.models.generate_content(
-            model=self.MODEL,
+            model=self.model,
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
@@ -36,7 +38,7 @@ class GoogleLLM(LLMProvider):
     ) -> AsyncIterator[str]:
         client = await self._get_client()
         stream = await client.aio.models.generate_content_stream(
-            model=self.MODEL,
+            model=self.model,
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,

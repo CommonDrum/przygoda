@@ -10,6 +10,7 @@ import type {
   PromptKind,
   ImageVersion,
   ExportFormat,
+  ModelCatalog,
 } from "./types";
 import { getToken, clearToken } from "./auth";
 
@@ -133,6 +134,45 @@ export async function regenerateReference(
   return data;
 }
 
+export async function uploadReferenceImage(
+  projectId: number,
+  file: File
+): Promise<Project> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post(
+    `/projects/${projectId}/upload-reference`,
+    form
+  );
+  return data;
+}
+
+export async function uploadStyleGuide(
+  projectId: number,
+  file: File
+): Promise<Project> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post(
+    `/projects/${projectId}/upload-style-guide`,
+    form
+  );
+  return data;
+}
+
+export async function deleteStyleGuide(projectId: number): Promise<Project> {
+  const { data } = await api.delete(`/projects/${projectId}/style-guide`);
+  return data;
+}
+
+export async function updatePage(
+  pageId: number,
+  data: { text?: string | null; image_prompt?: string | null }
+): Promise<Page> {
+  const { data: result } = await api.put(`/pages/${pageId}`, data);
+  return result;
+}
+
 export async function approveReference(projectId: number): Promise<Project> {
   const { data } = await api.post(`/projects/${projectId}/approve-reference`);
   return data;
@@ -216,4 +256,11 @@ export async function updatePrompt(
 
 export async function deletePrompt(id: number): Promise<void> {
   await api.delete(`/prompts/${id}`);
+}
+
+// --- Provider model catalog ---
+
+export async function getModelCatalog(): Promise<ModelCatalog> {
+  const { data } = await api.get("/providers/models");
+  return data;
 }

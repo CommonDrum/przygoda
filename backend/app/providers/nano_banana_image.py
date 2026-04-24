@@ -10,9 +10,12 @@ from ..routers.settings import get_setting_value
 class NanoBananaImage(ImageProvider):
     API_URL = "https://api.nanobanana.com/v1/generate"
 
+    def __init__(self, model: str | None = None):
+        self.model = model
+
     async def generate_image(
         self, prompt: str,
-        reference_image_bytes: bytes | None = None,
+        reference_images: list[bytes] | None = None,
         aspect_ratio: str = "1:1",
         image_size: str = "1K",
     ) -> bytes:
@@ -24,8 +27,11 @@ class NanoBananaImage(ImageProvider):
             "prompt": prompt,
             "aspect_ratio": aspect_ratio,
         }
-        if reference_image_bytes:
-            b64 = base64.b64encode(reference_image_bytes).decode()
+        # API supports only one reference — prefer the last one (character ref
+        # wins over style guide if both are passed).
+        if reference_images:
+            last = reference_images[-1]
+            b64 = base64.b64encode(last).decode()
             payload["reference_image"] = f"data:image/png;base64,{b64}"
 
         async with httpx.AsyncClient(timeout=120) as client:
@@ -37,7 +43,6 @@ class NanoBananaImage(ImageProvider):
             resp.raise_for_status()
             data = resp.json()
 
-            # Download the generated image
             image_url = data.get("image_url") or data.get("url")
             if not image_url:
                 raise ValueError(f"No image URL in response: {data}")

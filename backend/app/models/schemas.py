@@ -22,6 +22,10 @@ class ProjectCreate(BaseModel):
     moral: str = Field(min_length=1)
     story_prompt_id: int | None = None
     image_prompt_id: int | None = None
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    image_provider: str | None = None
+    image_model: str | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -37,7 +41,9 @@ class ProjectUpdate(BaseModel):
     hobby: str | None = None
     moral: str | None = None
     llm_provider: str | None = None
+    llm_model: str | None = None
     image_provider: str | None = None
+    image_model: str | None = None
     story_prompt_id: int | None = None
     image_prompt_id: int | None = None
     fulfillment_status: FulfillmentStatus | None = None
@@ -63,10 +69,14 @@ class ProjectResponse(BaseModel):
     raw_story: str | None = None
     raw_image_prompts: str | None = None
     llm_provider: str
+    llm_model: str | None = None
     image_provider: str
+    image_model: str | None = None
     reference_image_prompt: str | None = None
     reference_image_path: str | None = None
     reference_image_version: int = 0
+    reference_image_is_custom: bool = False
+    style_guide_image_path: str | None = None
     story_prompt_id: int | None = None
     image_prompt_id: int | None = None
     fulfillment_status: FulfillmentStatus = "oczekuje"

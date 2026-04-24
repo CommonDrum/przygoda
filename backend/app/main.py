@@ -11,7 +11,7 @@ from .auth import get_current_user
 from .config import settings as app_settings, STATIC_DIR, UPLOADS_DIR, EXPORTS_DIR
 from .database import init_db
 from .seed import seed_demo_project
-from .routers import projects, pages, settings, generation, exports, auth, prompts
+from .routers import projects, pages, settings, generation, exports, auth, prompts, providers
 from .services.ws_manager import ConnectionManager
 
 
@@ -49,6 +49,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(projects.router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(pages.router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(prompts.router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(providers.router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(settings.router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(generation.router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(generation.ws_router)  # WS — no /api prefix, auth via token query param

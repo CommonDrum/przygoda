@@ -1,7 +1,25 @@
 import { useEffect, useState } from "react";
-import type { Project, ProjectUpdateInput, Prompt } from "../lib/types";
-import { updateProject, listPrompts } from "../lib/api";
+import type {
+  ModelCatalog,
+  Project,
+  ProjectUpdateInput,
+  Prompt,
+} from "../lib/types";
+import { updateProject, listPrompts, getModelCatalog } from "../lib/api";
 import { useToast } from "../context/ToastContext";
+import ProviderModelSelect from "./ProviderModelSelect";
+
+const LLM_PROVIDERS = [
+  { value: "anthropic", label: "Anthropic" },
+  { value: "openai", label: "OpenAI" },
+  { value: "google", label: "Google" },
+];
+
+const IMAGE_PROVIDERS = [
+  { value: "nano_banana", label: "Nano Banana" },
+  { value: "dalle", label: "OpenAI (DALL·E / GPT-Image)" },
+  { value: "google", label: "Google (Gemini)" },
+];
 
 interface Props {
   project: Project;
@@ -24,15 +42,19 @@ export default function EditProjectModal({ project, onSave, onClose }: Props) {
     hobby: project.hobby,
     moral: project.moral,
     llm_provider: project.llm_provider,
+    llm_model: project.llm_model,
     image_provider: project.image_provider,
+    image_model: project.image_model,
     story_prompt_id: project.story_prompt_id,
     image_prompt_id: project.image_prompt_id,
   });
   const [saving, setSaving] = useState(false);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
 
   useEffect(() => {
     listPrompts().then(setPrompts).catch(() => {});
+    getModelCatalog().then(setCatalog).catch(() => {});
   }, []);
 
   const storyPrompts = prompts.filter((p) => p.kind === "story");
@@ -130,24 +152,35 @@ export default function EditProjectModal({ project, onSave, onClose }: Props) {
             <input className="input-warm" value={form.moral ?? ""} onChange={(e) => set("moral", e.target.value)} required />
           </div>
 
-          <div className="grid grid-cols-2 gap-3.5">
-            <div>
-              <label className="label-warm">LLM Provider</label>
-              <select className="input-warm" value={form.llm_provider ?? project.llm_provider} onChange={(e) => set("llm_provider", e.target.value)}>
-                <option value="anthropic">Anthropic (Claude)</option>
-                <option value="openai">OpenAI (GPT)</option>
-                <option value="google">Google (Gemini)</option>
-              </select>
-            </div>
-            <div>
-              <label className="label-warm">Image Provider</label>
-              <select className="input-warm" value={form.image_provider ?? project.image_provider} onChange={(e) => set("image_provider", e.target.value)}>
-                <option value="nano_banana">Nano Banana</option>
-                <option value="dalle">DALL-E 3</option>
-                <option value="google">Google (Gemini)</option>
-              </select>
-            </div>
-          </div>
+          <ProviderModelSelect
+            label="Tekst (LLM)"
+            kind="llm"
+            providerOptions={LLM_PROVIDERS}
+            provider={form.llm_provider ?? project.llm_provider}
+            model={form.llm_model ?? null}
+            catalog={catalog?.llm ?? null}
+            onProviderChange={(p) =>
+              setForm((prev) => ({ ...prev, llm_provider: p, llm_model: null }))
+            }
+            onModelChange={(m) => set("llm_model", m)}
+          />
+
+          <ProviderModelSelect
+            label="Obrazki"
+            kind="image"
+            providerOptions={IMAGE_PROVIDERS}
+            provider={form.image_provider ?? project.image_provider}
+            model={form.image_model ?? null}
+            catalog={catalog?.image ?? null}
+            onProviderChange={(p) =>
+              setForm((prev) => ({
+                ...prev,
+                image_provider: p,
+                image_model: null,
+              }))
+            }
+            onModelChange={(m) => set("image_model", m)}
+          />
 
           <div className="grid grid-cols-2 gap-3.5">
             <div>

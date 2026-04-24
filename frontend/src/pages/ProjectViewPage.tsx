@@ -11,7 +11,6 @@ import type {
 } from "../lib/types";
 import { FULFILLMENT_LABELS, FULFILLMENT_ORDER } from "../lib/types";
 import {
-  approveReference,
   exportProject,
   generateImages,
   generatePrompts,
@@ -21,10 +20,10 @@ import {
   getPages,
   getProject,
   getReferenceVersions,
-  regenerateReference,
   restorePageVersion,
   restoreReference,
   updateProject,
+  uploadReferenceImage,
 } from "../lib/api";
 import { connectWebSocket } from "../lib/ws";
 import type { WsConnection, WsStatus } from "../lib/ws";
@@ -32,8 +31,10 @@ import { useToast } from "../context/ToastContext";
 import StatusBadge from "../components/StatusBadge";
 import PageCard from "../components/PageCard";
 import EditProjectModal from "../components/EditProjectModal";
-import RegenerateModal from "../components/RegenerateModal";
+import EditPageModal from "../components/EditPageModal";
 import ImageHistoryModal from "../components/ImageHistoryModal";
+import StyleGuideWidget from "../components/StyleGuideWidget";
+import ReferenceReviewPanel from "../components/ReferenceReviewPanel";
 
 type ImageProgressMap = Record<number, "generating" | "completed" | "failed">;
 
@@ -53,7 +54,8 @@ export default function ProjectViewPage() {
   const [exportLoading, setExportLoading] = useState<ExportFormat | null>(null);
 
   const [showEditModal, setShowEditModal] = useState(false);
-  const [regenPage, setRegenPage] = useState<Page | null>(null);
+  const [editingPage, setEditingPage] = useState<Page | null>(null);
+  const draftUploadRef = useRef<HTMLInputElement | null>(null);
   const [historyTarget, setHistoryTarget] = useState<HistoryTarget | null>(null);
   const [streamingText, setStreamingText] = useState("");
   const [streamingPhase, setStreamingPhase] = useState<string | null>(null);
@@ -171,17 +173,17 @@ export default function ProjectViewPage() {
       setProject(updated);
     }).catch(() => {});
 
-  const handleRegenerateReference = () =>
-    runAction(async () => {
-      const updated = await regenerateReference(projectId);
+  const handleUploadDraft = async (file: File) => {
+    try {
+      const updated = await uploadReferenceImage(projectId, file);
       setProject(updated);
-    }).catch(() => {});
-
-  const handleApproveReference = () =>
-    runAction(async () => {
-      const updated = await approveReference(projectId);
-      setProject(updated);
-    }).catch(() => {});
+      addToast("Wgrano własny obraz postaci", "success");
+    } catch {
+      addToast("Nie udało się wgrać obrazka", "error");
+    } finally {
+      if (draftUploadRef.current) draftUploadRef.current.value = "";
+    }
+  };
 
   const handleGenerateStory = () =>
     runAction(async () => {
@@ -219,9 +221,9 @@ export default function ProjectViewPage() {
     }
   };
 
-  const handleRegenerate = (pageId: number) => {
+  const handleEditPage = (pageId: number) => {
     const page = pages.find((p) => p.id === pageId);
-    if (page) setRegenPage(page);
+    if (page) setEditingPage(page);
   };
 
   const handleShowHistory = (pageId: number) => {
@@ -355,33 +357,56 @@ export default function ProjectViewPage() {
         </div>
       </div>
 
+      {/* Style guide (shown during editable phases) */}
+      {project.status !== "images_generating" && (
+        <div className="mb-6">
+          <StyleGuideWidget project={project} onUpdate={setProject} />
+        </div>
+      )}
+
+      {/* Reference review panel — full UI for editing/approving the character ref */}
+      {project.status === "ref_pic_review" && (
+        <ReferenceReviewPanel
+          project={project}
+          onUpdate={setProject}
+          onShowHistory={() =>
+            setHistoryTarget({
+              kind: "reference",
+              title: "Obrazek postaci",
+              currentImagePath: project.reference_image_path,
+            })
+          }
+        />
+      )}
+
       {/* Actions */}
       <div className="flex gap-3 mb-8 flex-wrap">
         {project.status === "draft" && (
-          <button
-            onClick={handleGenerateReference}
-            disabled={actionLoading}
-            className="btn-primary"
-          >
-            {actionLoading ? "Generowanie..." : "Generuj obraz postaci"}
-          </button>
-        )}
-
-        {project.status === "ref_pic_review" && (
           <>
+            <input
+              ref={draftUploadRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleUploadDraft(f);
+              }}
+            />
             <button
-              onClick={handleRegenerateReference}
-              disabled={actionLoading}
-              className="btn-secondary"
-            >
-              {actionLoading ? "Generowanie..." : "Wygeneruj postać ponownie"}
-            </button>
-            <button
-              onClick={handleApproveReference}
+              onClick={handleGenerateReference}
               disabled={actionLoading}
               className="btn-primary"
             >
-              Akceptuję — generuj historię
+              {actionLoading ? "Generowanie..." : "Generuj obraz postaci"}
+            </button>
+            <button
+              onClick={() => draftUploadRef.current?.click()}
+              disabled={actionLoading}
+              className="btn-secondary"
+              title="Pomiń AI i wgraj własne zdjęcie/szkic postaci"
+            >
+              Wgraj własny obraz postaci
             </button>
           </>
         )}
@@ -534,12 +559,14 @@ export default function ProjectViewPage() {
                 imageStatuses[page.page_number] === "generating"
               }
               showRegenerate={
-                project.status === "review" || project.status === "exported"
+                project.status === "prompts_generated" ||
+                project.status === "review" ||
+                project.status === "exported"
               }
               showHistory={
                 project.status === "review" || project.status === "exported"
               }
-              onRegenerate={handleRegenerate}
+              onRegenerate={handleEditPage}
               onShowHistory={handleShowHistory}
             />
           </div>
@@ -559,17 +586,17 @@ export default function ProjectViewPage() {
         />
       )}
 
-      {/* Regenerate image modal */}
-      {regenPage && (
-        <RegenerateModal
-          page={regenPage}
-          onDone={(updated) => {
+      {/* Edit page modal (text + prompt + history) */}
+      {editingPage && (
+        <EditPageModal
+          page={editingPage}
+          onUpdate={(updated) => {
             setPages((prev) =>
               prev.map((p) => (p.id === updated.id ? updated : p))
             );
-            setRegenPage(null);
+            setEditingPage(updated);
           }}
-          onClose={() => setRegenPage(null)}
+          onClose={() => setEditingPage(null)}
         />
       )}
 

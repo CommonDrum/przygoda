@@ -48,10 +48,14 @@ export interface Project {
   raw_story: string | null;
   raw_image_prompts: string | null;
   llm_provider: string;
+  llm_model: string | null;
   image_provider: string;
+  image_model: string | null;
   reference_image_prompt: string | null;
   reference_image_path: string | null;
   reference_image_version: number;
+  reference_image_is_custom: boolean;
+  style_guide_image_path: string | null;
   story_prompt_id: number | null;
   image_prompt_id: number | null;
   fulfillment_status: FulfillmentStatus;
@@ -73,7 +77,9 @@ export interface ProjectCreateInput {
   hobby: string;
   moral: string;
   llm_provider?: string;
+  llm_model?: string | null;
   image_provider?: string;
+  image_model?: string | null;
   story_prompt_id?: number | null;
   image_prompt_id?: number | null;
 }
@@ -91,10 +97,23 @@ export interface ProjectUpdateInput {
   hobby?: string;
   moral?: string;
   llm_provider?: string;
+  llm_model?: string | null;
   image_provider?: string;
+  image_model?: string | null;
   story_prompt_id?: number | null;
   image_prompt_id?: number | null;
   fulfillment_status?: FulfillmentStatus;
+}
+
+export interface ModelEntry {
+  id: string;
+  label: string;
+  is_default: boolean;
+}
+
+export interface ModelCatalog {
+  llm: Record<string, ModelEntry[]>;
+  image: Record<string, ModelEntry[]>;
 }
 
 export type PageType = "cover" | "story" | "back";

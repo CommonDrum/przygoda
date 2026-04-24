@@ -3,11 +3,15 @@ from collections.abc import AsyncIterator
 import anthropic
 
 from .base import LLMProvider
+from .catalog import default_llm_model
 from ..config import settings
 from ..routers.settings import get_setting_value
 
 
 class AnthropicLLM(LLMProvider):
+    def __init__(self, model: str | None = None):
+        self.model = model or default_llm_model("anthropic")
+
     async def _get_client(self):
         api_key = await get_setting_value("anthropic_api_key") or settings.ANTHROPIC_API_KEY
         if not api_key:
@@ -17,7 +21,7 @@ class AnthropicLLM(LLMProvider):
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
         client = await self._get_client()
         message = await client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=self.model,
             max_tokens=8192,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
@@ -31,7 +35,7 @@ class AnthropicLLM(LLMProvider):
     ) -> AsyncIterator[str]:
         client = await self._get_client()
         async with client.messages.stream(
-            model="claude-sonnet-4-20250514",
+            model=self.model,
             max_tokens=8192,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],

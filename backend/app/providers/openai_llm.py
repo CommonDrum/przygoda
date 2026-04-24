@@ -3,11 +3,15 @@ from collections.abc import AsyncIterator
 import openai
 
 from .base import LLMProvider
+from .catalog import default_llm_model
 from ..config import settings
 from ..routers.settings import get_setting_value
 
 
 class OpenAILLM(LLMProvider):
+    def __init__(self, model: str | None = None):
+        self.model = model or default_llm_model("openai")
+
     async def _get_client(self):
         api_key = await get_setting_value("openai_api_key") or settings.OPENAI_API_KEY
         if not api_key:
@@ -17,7 +21,7 @@ class OpenAILLM(LLMProvider):
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
         client = await self._get_client()
         response = await client.chat.completions.create(
-            model="gpt-4o",
+            model=self.model,
             max_tokens=8192,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -33,7 +37,7 @@ class OpenAILLM(LLMProvider):
     ) -> AsyncIterator[str]:
         client = await self._get_client()
         stream = await client.chat.completions.create(
-            model="gpt-4o",
+            model=self.model,
             max_tokens=8192,
             stream=True,
             messages=[

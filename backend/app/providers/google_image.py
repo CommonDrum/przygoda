@@ -2,12 +2,14 @@ from google import genai
 from google.genai import types
 
 from .base import ImageProvider
+from .catalog import default_image_model
 from ..config import settings
 from ..routers.settings import get_setting_value
 
 
 class GoogleImage(ImageProvider):
-    MODEL = "gemini-3.1-flash-image-preview"
+    def __init__(self, model: str | None = None):
+        self.model = model or default_image_model("google")
 
     async def _get_client(self):
         api_key = await get_setting_value("google_api_key") or settings.GOOGLE_API_KEY
@@ -17,26 +19,26 @@ class GoogleImage(ImageProvider):
 
     async def generate_image(
         self, prompt: str,
-        reference_image_bytes: bytes | None = None,
+        reference_images: list[bytes] | None = None,
         aspect_ratio: str = "1:1",
         image_size: str = "1K",
     ) -> bytes:
         client = await self._get_client()
 
         contents = []
-        if reference_image_bytes:
+        for img in reference_images or []:
             contents.append(
                 types.Part(
                     inline_data=types.Blob(
                         mime_type="image/png",
-                        data=reference_image_bytes,
+                        data=img,
                     )
                 )
             )
         contents.append(prompt)
 
         response = await client.aio.models.generate_content(
-            model=self.MODEL,
+            model=self.model,
             contents=contents,
             config=types.GenerateContentConfig(
                 image_config=types.ImageConfig(

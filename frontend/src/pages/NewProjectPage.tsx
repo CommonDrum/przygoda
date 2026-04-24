@@ -1,8 +1,21 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { ProjectCreateInput, Prompt } from "../lib/types";
-import { createProject, listPrompts } from "../lib/api";
+import type { ModelCatalog, ProjectCreateInput, Prompt } from "../lib/types";
+import { createProject, getModelCatalog, listPrompts } from "../lib/api";
 import { useToast } from "../context/ToastContext";
+import ProviderModelSelect from "../components/ProviderModelSelect";
+
+const LLM_PROVIDERS = [
+  { value: "anthropic", label: "Anthropic" },
+  { value: "openai", label: "OpenAI" },
+  { value: "google", label: "Google" },
+];
+
+const IMAGE_PROVIDERS = [
+  { value: "nano_banana", label: "Nano Banana" },
+  { value: "dalle", label: "OpenAI (DALL·E / GPT-Image)" },
+  { value: "google", label: "Google (Gemini)" },
+];
 
 const defaults: ProjectCreateInput = {
   child_name: "",
@@ -18,6 +31,10 @@ const defaults: ProjectCreateInput = {
   moral: "",
   story_prompt_id: null,
   image_prompt_id: null,
+  llm_provider: "anthropic",
+  llm_model: null,
+  image_provider: "nano_banana",
+  image_model: null,
 };
 
 export default function NewProjectPage() {
@@ -26,6 +43,7 @@ export default function NewProjectPage() {
   const [form, setForm] = useState<ProjectCreateInput>({ ...defaults });
   const [submitting, setSubmitting] = useState(false);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
 
   useEffect(() => {
     listPrompts()
@@ -40,6 +58,7 @@ export default function NewProjectPage() {
         }));
       })
       .catch(() => {});
+    getModelCatalog().then(setCatalog).catch(() => {});
   }, []);
 
   const storyPrompts = prompts.filter((p) => p.kind === "story");
@@ -209,6 +228,38 @@ export default function NewProjectPage() {
               required
             />
           </div>
+        </div>
+
+        {/* Providers + models */}
+        <div className="card-storybook p-6 space-y-4">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-lg">&#x1F916;</span>
+            <h2 className="font-display font-bold text-bark-600">
+              Silniki AI
+            </h2>
+          </div>
+
+          <ProviderModelSelect
+            label="Tekst (LLM)"
+            kind="llm"
+            providerOptions={LLM_PROVIDERS}
+            provider={form.llm_provider ?? "anthropic"}
+            model={form.llm_model ?? null}
+            catalog={catalog?.llm ?? null}
+            onProviderChange={(p) => set("llm_provider", p)}
+            onModelChange={(m) => set("llm_model", m)}
+          />
+
+          <ProviderModelSelect
+            label="Obrazki"
+            kind="image"
+            providerOptions={IMAGE_PROVIDERS}
+            provider={form.image_provider ?? "nano_banana"}
+            model={form.image_model ?? null}
+            catalog={catalog?.image ?? null}
+            onProviderChange={(p) => set("image_provider", p)}
+            onModelChange={(m) => set("image_model", m)}
+          />
         </div>
 
         {/* Prompts selection */}
