@@ -261,7 +261,14 @@ class TestGenerateImages:
             )
             failed = list(await cursor.fetchall())
             assert len(failed) > 0
-            assert all("kaboom" in r["image_error"] for r in failed)
+            # User-facing error text must be present — and must NOT leak the
+            # raw "provider kaboom" internal message to non-technical users.
+            for r in failed:
+                assert r["image_error"]
+                assert "kaboom" not in r["image_error"]
+                # Generic fallback includes the suggestion to retry
+                assert "spróbuj" in r["image_error"].lower() \
+                    or "ponownie" in r["image_error"].lower()
         finally:
             await db.close()
 

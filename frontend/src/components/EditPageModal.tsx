@@ -6,6 +6,7 @@ import {
   restorePageVersion,
   updatePage,
 } from "../lib/api";
+import { showErrorToast } from "../lib/errors";
 import { useToast } from "../context/ToastContext";
 
 interface Props {
@@ -47,8 +48,8 @@ export default function EditPageModal({ page, onUpdate, onClose }: Props) {
       const updated = await updatePage(page.id, { text });
       onUpdate(updated);
       addToast("Tekst zapisany", "success");
-    } catch {
-      addToast("Nie udało się zapisać tekstu", "error");
+    } catch (e) {
+      showErrorToast(addToast, e);
     } finally {
       setSavingText(false);
     }
@@ -60,8 +61,8 @@ export default function EditPageModal({ page, onUpdate, onClose }: Props) {
       const updated = await updatePage(page.id, { image_prompt: prompt });
       onUpdate(updated);
       addToast("Prompt zapisany", "success");
-    } catch {
-      addToast("Nie udało się zapisać promptu", "error");
+    } catch (e) {
+      showErrorToast(addToast, e);
     } finally {
       setSavingPrompt(false);
     }
@@ -74,8 +75,8 @@ export default function EditPageModal({ page, onUpdate, onClose }: Props) {
       onUpdate(updated);
       setVersions(null); // force reload on next history view
       addToast("Wygenerowano nową wersję", "success");
-    } catch {
-      addToast("Nie udało się wygenerować", "error");
+    } catch (e) {
+      showErrorToast(addToast, e);
     } finally {
       setRegenerating(false);
     }
@@ -88,8 +89,8 @@ export default function EditPageModal({ page, onUpdate, onClose }: Props) {
       const updated = await restorePageVersion(page.id, v.id);
       onUpdate(updated);
       addToast("Wersja przywrócona", "success");
-    } catch {
-      addToast("Nie udało się przywrócić", "error");
+    } catch (e) {
+      showErrorToast(addToast, e);
     } finally {
       setRestoring(null);
     }

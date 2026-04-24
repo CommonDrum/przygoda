@@ -2,11 +2,13 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from jose import JWTError
 
 logger = logging.getLogger(__name__)
 
 from ..auth import verify_token
+from ..errors import classify_error
 from ..models.schemas import ProjectResponse, PageResponse, RegenerateRequest
 from ..services.locks import (
     ProjectBusyError,
@@ -39,18 +41,14 @@ def set_ws_manager(manager: ConnectionManager):
 
 
 def _handle_error(e: Exception):
-    msg = str(e)
-    if "not found" in msg.lower():
-        raise HTTPException(404, msg)
-    if "Cannot" in msg or "oczekiwano" in msg.lower() or "expected" in msg.lower():
-        raise HTTPException(409, msg)
-    # Log full traceback — otherwise 500s are invisible to ops.
+    """Let the global exception handler classify it — but keep a traceback
+    log here so we have the path info. Just re-raise."""
     logger.exception("Generation endpoint failed: %s", e)
-    raise HTTPException(500, msg or type(e).__name__)
+    raise e
 
 
 def _busy_409() -> HTTPException:
-    return HTTPException(409, "Dla tego projektu już trwa operacja")
+    return HTTPException(409, "Dla tego projektu już trwa operacja — poczekaj chwilę.")
 
 
 # ---- Reference image stage ----

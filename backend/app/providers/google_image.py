@@ -49,14 +49,57 @@ class GoogleImage(ImageProvider):
                     ),
                 ),
             )
-
-            image_parts = [
-                part for part in response.candidates[0].content.parts
-                if part.inline_data and part.inline_data.mime_type.startswith("image/")
-            ]
-            if not image_parts:
-                raise ValueError("Google returned no image in response")
-
-            return image_parts[0].inline_data.data
+            return _extract_image_bytes(response)
 
         return await with_retry(_call, label=f"google-image:{self.model}")
+
+
+def _extract_image_bytes(response) -> bytes:
+    """Pull PNG bytes out of a Gemini image response, or raise a ValueError
+    that actually tells the caller what went wrong. Covers the cases where
+    the SDK returns `parts=None` because the model refused (safety, recitation,
+    empty output) instead of raising an exception."""
+    prompt_feedback = getattr(response, "prompt_feedback", None)
+    if prompt_feedback and getattr(prompt_feedback, "block_reason", None):
+        reason = prompt_feedback.block_reason
+        raise ValueError(
+            f"Google zablokował prompt (block_reason={reason}) — zmień opis "
+            f"obrazka i spróbuj ponownie."
+        )
+
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        raise ValueError(
+            "Google nie zwrócił żadnego kandydata (prawdopodobnie blokada "
+            "bezpieczeństwa). Zmień prompt."
+        )
+
+    cand = candidates[0]
+    finish_reason = getattr(cand, "finish_reason", None)
+    content = getattr(cand, "content", None)
+    parts = getattr(content, "parts", None) if content else None
+
+    if not parts:
+        # Content was suppressed — finish_reason is the real story.
+        fr = str(finish_reason) if finish_reason else "unknown"
+        raise ValueError(
+            f"Google odrzucił obrazek (finish_reason={fr}). "
+            f"Najczęściej: safety filter na postaci/scenie — zmień prompt "
+            f"(np. mniej detali o wieku dziecka, neutralniejsza sceneria)."
+        )
+
+    image_parts = [
+        p for p in parts
+        if getattr(p, "inline_data", None)
+        and p.inline_data.mime_type
+        and p.inline_data.mime_type.startswith("image/")
+    ]
+    if not image_parts:
+        # Got text back instead of image — surface what the model said.
+        text_parts = [getattr(p, "text", "") for p in parts if getattr(p, "text", None)]
+        text_hint = " | ".join(t for t in text_parts if t)[:200] or "(brak)"
+        raise ValueError(
+            f"Google zwrócił odpowiedź bez obrazka. Treść: {text_hint}"
+        )
+
+    return image_parts[0].inline_data.data

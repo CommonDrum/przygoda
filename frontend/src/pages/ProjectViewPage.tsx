@@ -1,6 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
-import axios from "axios";
 import type {
   ExportFormat,
   FulfillmentStatus,
@@ -28,6 +27,7 @@ import {
 } from "../lib/api";
 import { connectWebSocket } from "../lib/ws";
 import type { WsConnection, WsStatus } from "../lib/ws";
+import { friendlyToString, toFriendlyError } from "../lib/errors";
 import { useToast } from "../context/ToastContext";
 import StatusBadge from "../components/StatusBadge";
 import PageCard from "../components/PageCard";
@@ -173,13 +173,8 @@ export default function ProjectViewPage() {
     try {
       return await action();
     } catch (e: unknown) {
-      let msg = "Nieznany błąd";
-      if (axios.isAxiosError(e)) {
-        msg = e.response?.data?.detail || e.message;
-      } else if (e instanceof Error) {
-        msg = e.message;
-      }
-      addToast(msg, "error");
+      const friendly = toFriendlyError(e);
+      addToast(friendlyToString(friendly), "error");
       throw e;
     } finally {
       setActionLoading(false);
@@ -197,8 +192,9 @@ export default function ProjectViewPage() {
       const updated = await uploadReferenceImage(projectId, file);
       setProject(updated);
       addToast("Wgrano własny obraz postaci", "success");
-    } catch {
-      addToast("Nie udało się wgrać obrazka", "error");
+    } catch (e) {
+      const friendly = toFriendlyError(e);
+      addToast(friendlyToString(friendly), "error");
     } finally {
       if (draftUploadRef.current) draftUploadRef.current.value = "";
     }
@@ -273,7 +269,10 @@ export default function ProjectViewPage() {
         window.open(path, "_blank");
         addToast("Eksport gotowy", "success");
       })
-      .catch(() => addToast("Błąd eksportu", "error"))
+      .catch((e) => {
+        const friendly = toFriendlyError(e);
+        addToast(friendlyToString(friendly), "error");
+      })
       .finally(() => setExportLoading(null));
   };
 

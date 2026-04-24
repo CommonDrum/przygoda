@@ -4,6 +4,7 @@ import os
 import random
 
 from ..database import get_db
+from ..errors import classify_error
 
 logger = logging.getLogger(__name__)
 from ..providers.factory import get_llm_provider, get_image_provider
@@ -567,11 +568,17 @@ async def _generate_one_page(
             })
         return True
     except Exception as e:
-        err = str(e) or type(e).__name__
-        logger.error("Image gen failed page %d: %s", page_num, err, exc_info=True)
+        friendly = classify_error(e)
+        logger.error(
+            "Image gen failed page %d → %s: %s",
+            page_num, friendly.code, e, exc_info=True,
+        )
+        # Store user-facing message in DB so the UI shows something sensible
+        # even hours later (after the exception itself is long gone).
+        stored = f"{friendly.title}. {friendly.hint}"
         db = await get_db()
         try:
-            await _set_page_image_status(db, page_id, IMG_FAILED, err)
+            await _set_page_image_status(db, page_id, IMG_FAILED, stored)
             await db.commit()
         finally:
             await db.close()
@@ -581,7 +588,10 @@ async def _generate_one_page(
                 "page_number": page_num,
                 "page_id": page_id,
                 "status": "failed",
-                "error": err,
+                "error": friendly.title,
+                "code": friendly.code,
+                "hint": friendly.hint,
+                "retryable": friendly.retryable,
             })
         return False
 
@@ -778,14 +788,17 @@ async def regenerate_single_image(page_id: int, prompt: str | None = None) -> di
             aspect_ratio=aspect_ratio, image_size=image_size,
         )
     except Exception as e:
-        err = str(e) or type(e).__name__
+        friendly = classify_error(e)
         logger.error(
-            "regenerate_single_image failed page %d: %s", page_id, err,
-            exc_info=True,
+            "regenerate_single_image failed page %d → %s: %s",
+            page_id, friendly.code, e, exc_info=True,
         )
         db = await get_db()
         try:
-            await _set_page_image_status(db, page_id, IMG_FAILED, err)
+            await _set_page_image_status(
+                db, page_id, IMG_FAILED,
+                f"{friendly.title}. {friendly.hint}",
+            )
             await db.commit()
         finally:
             await db.close()

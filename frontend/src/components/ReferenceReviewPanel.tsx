@@ -5,6 +5,7 @@ import {
   regenerateReference,
   uploadReferenceImage,
 } from "../lib/api";
+import { showErrorToast } from "../lib/errors";
 import { useToast } from "../context/ToastContext";
 
 interface Props {
@@ -38,8 +39,8 @@ export default function ReferenceReviewPanel({
       );
       onUpdate(updated);
       addToast("Wygenerowano nową wersję postaci", "success");
-    } catch {
-      addToast("Nie udało się wygenerować", "error");
+    } catch (e) {
+      showErrorToast(addToast, e);
     } finally {
       setBusy(null);
     }
@@ -50,8 +51,8 @@ export default function ReferenceReviewPanel({
     try {
       const updated = await approveReference(project.id);
       onUpdate(updated);
-    } catch {
-      addToast("Nie udało się zaakceptować", "error");
+    } catch (e) {
+      showErrorToast(addToast, e);
     } finally {
       setBusy(null);
     }
@@ -63,8 +64,8 @@ export default function ReferenceReviewPanel({
       const updated = await uploadReferenceImage(project.id, file);
       onUpdate(updated);
       addToast("Wgrano własny obraz postaci", "success");
-    } catch {
-      addToast("Nie udało się wgrać obrazka", "error");
+    } catch (e) {
+      showErrorToast(addToast, e);
     } finally {
       setBusy(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
