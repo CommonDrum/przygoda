@@ -127,6 +127,31 @@ class TestGenerateReference:
             await db.close()
 
 
+async def _seed_ready_for_images(project_id: int) -> list[int]:
+    """Move a freshly-seeded project to prompts_generated with real prompts
+    on every page. Returns the ordered page_ids."""
+    db = await db_module.get_db()
+    try:
+        await db.execute(
+            "UPDATE projects SET status = 'prompts_generated' WHERE id = ?",
+            (project_id,),
+        )
+        cursor = await db.execute(
+            "SELECT id FROM pages WHERE project_id = ? ORDER BY page_number",
+            (project_id,),
+        )
+        page_ids = [r["id"] for r in await cursor.fetchall()]
+        for pid in page_ids:
+            await db.execute(
+                "UPDATE pages SET image_prompt = ? WHERE id = ?",
+                (f"prompt {pid}", pid),
+            )
+        await db.commit()
+        return page_ids
+    finally:
+        await db.close()
+
+
 class TestGenerateImages:
     @pytest.mark.asyncio
     async def test_page_rows_get_page_id(self, setup_test_db, tmp_path, monkeypatch):
@@ -185,5 +210,162 @@ class TestGenerateImages:
             )
             status = (await cursor.fetchone())["status"]
             assert status == "review"
+
+            # Every page marked done
+            cursor = await db.execute(
+                """SELECT COUNT(*) AS n FROM pages
+                   WHERE project_id = ? AND image_status = 'done'""",
+                (project_id,),
+            )
+            assert (await cursor.fetchone())["n"] == 17
         finally:
             await db.close()
+
+    @pytest.mark.asyncio
+    async def test_partial_failure_sets_images_partial_status(
+        self, setup_test_db, tmp_path, monkeypatch,
+    ):
+        """If N/17 pages fail, project ends in 'images_partial' and those
+        pages have image_status='failed' with the error captured."""
+        monkeypatch.setattr(story_service, "UPLOADS_DIR", tmp_path)
+
+        project_id = await _seed_project()
+        await _seed_ready_for_images(project_id)
+
+        # Flaky provider: fail every 3rd call
+        img = AsyncMock()
+        call_count = {"n": 0}
+
+        async def flaky(*_a, **_kw):
+            call_count["n"] += 1
+            if call_count["n"] % 3 == 0:
+                raise RuntimeError("provider kaboom")
+            return PNG_1x1
+        img.generate_image = flaky
+
+        ws = AsyncMock()
+        with patch.object(story_service, "get_image_provider", return_value=img):
+            await story_service.generate_images(project_id, ws)
+
+        db = await db_module.get_db()
+        try:
+            cursor = await db.execute(
+                "SELECT status FROM projects WHERE id = ?", (project_id,),
+            )
+            assert (await cursor.fetchone())["status"] == "images_partial"
+
+            cursor = await db.execute(
+                """SELECT image_status, image_error FROM pages
+                   WHERE project_id = ? AND image_status = 'failed'""",
+                (project_id,),
+            )
+            failed = list(await cursor.fetchall())
+            assert len(failed) > 0
+            assert all("kaboom" in r["image_error"] for r in failed)
+        finally:
+            await db.close()
+
+    @pytest.mark.asyncio
+    async def test_all_failures_go_back_to_prompts_generated(
+        self, setup_test_db, tmp_path, monkeypatch,
+    ):
+        """If every page fails, project returns to prompts_generated so user
+        can retry without a weird 'partial' state showing 0/17."""
+        monkeypatch.setattr(story_service, "UPLOADS_DIR", tmp_path)
+
+        project_id = await _seed_project()
+        await _seed_ready_for_images(project_id)
+
+        img = AsyncMock()
+        img.generate_image.side_effect = RuntimeError("always fails")
+
+        ws = AsyncMock()
+        with patch.object(story_service, "get_image_provider", return_value=img):
+            await story_service.generate_images(project_id, ws)
+
+        db = await db_module.get_db()
+        try:
+            cursor = await db.execute(
+                "SELECT status FROM projects WHERE id = ?", (project_id,),
+            )
+            assert (await cursor.fetchone())["status"] == "prompts_generated"
+        finally:
+            await db.close()
+
+
+class TestRetryFailedImages:
+    @pytest.mark.asyncio
+    async def test_retries_only_non_done_pages(
+        self, setup_test_db, tmp_path, monkeypatch,
+    ):
+        """retry_failed_images must skip pages that already succeeded. Scenario:
+        first pass fails 6 pages → retry pass where provider now works → all
+        17 end up done, and `review` status."""
+        monkeypatch.setattr(story_service, "UPLOADS_DIR", tmp_path)
+
+        project_id = await _seed_project()
+        await _seed_ready_for_images(project_id)
+
+        img = AsyncMock()
+        fail_every_3rd = {"n": 0}
+
+        async def flaky_then_stable(*_a, **_kw):
+            fail_every_3rd["n"] += 1
+            if fail_every_3rd["n"] <= 17 and fail_every_3rd["n"] % 3 == 0:
+                raise RuntimeError("flaky")
+            return PNG_1x1
+        img.generate_image = flaky_then_stable
+
+        ws = AsyncMock()
+        with patch.object(story_service, "get_image_provider", return_value=img):
+            await story_service.generate_images(project_id, ws)
+
+        db = await db_module.get_db()
+        try:
+            cursor = await db.execute(
+                """SELECT COUNT(*) AS n FROM pages
+                   WHERE project_id = ? AND image_status = 'failed'""",
+                (project_id,),
+            )
+            failed_first_pass = (await cursor.fetchone())["n"]
+            assert failed_first_pass > 0
+
+            cursor = await db.execute(
+                """SELECT COUNT(*) AS n FROM pages
+                   WHERE project_id = ? AND image_status = 'done'""",
+                (project_id,),
+            )
+            done_before = (await cursor.fetchone())["n"]
+        finally:
+            await db.close()
+
+        # Provider now stable — retry
+        good_img = _fake_image()
+        with patch.object(story_service, "get_image_provider", return_value=good_img):
+            await story_service.retry_failed_images(project_id, ws)
+
+        # Retry should only call for the failed count
+        assert good_img.generate_image.call_count == failed_first_pass
+
+        db = await db_module.get_db()
+        try:
+            cursor = await db.execute(
+                """SELECT COUNT(*) AS n FROM pages
+                   WHERE project_id = ? AND image_status = 'done'""",
+                (project_id,),
+            )
+            assert (await cursor.fetchone())["n"] == 17
+
+            cursor = await db.execute(
+                "SELECT status FROM projects WHERE id = ?", (project_id,),
+            )
+            assert (await cursor.fetchone())["status"] == "review"
+        finally:
+            await db.close()
+
+    @pytest.mark.asyncio
+    async def test_retry_rejects_wrong_project_status(self, setup_test_db):
+        """Can't retry from draft/story_generating/etc."""
+        project_id = await _seed_project()  # still in 'draft'
+        with pytest.raises(ValueError, match="Cannot retry"):
+            await story_service.retry_failed_images(project_id, ws_manager=None)

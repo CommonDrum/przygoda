@@ -192,6 +192,10 @@ export async function generateImages(projectId: number): Promise<void> {
   await api.post(`/projects/${projectId}/generate-images`);
 }
 
+export async function retryFailedImages(projectId: number): Promise<void> {
+  await api.post(`/projects/${projectId}/retry-failed-images`);
+}
+
 export async function regenerateImage(
   pageId: number,
   prompt?: string

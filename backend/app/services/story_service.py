@@ -30,8 +30,25 @@ STATUS_STORY_GENERATED = "story_generated"
 STATUS_PROMPTS_GENERATING = "prompts_generating"
 STATUS_PROMPTS_GENERATED = "prompts_generated"
 STATUS_IMAGES_GENERATING = "images_generating"
+STATUS_IMAGES_PARTIAL = "images_partial"  # some page images failed — user can retry
 STATUS_REVIEW = "review"
 STATUS_EXPORTED = "exported"
+
+# Per-page image states
+IMG_PENDING = "pending"
+IMG_GENERATING = "generating"
+IMG_DONE = "done"
+IMG_FAILED = "failed"
+
+
+async def _set_page_image_status(
+    db, page_id: int, status: str, error: str | None = None,
+):
+    """Set per-page image_status (+ optional error message). Caller commits."""
+    await db.execute(
+        "UPDATE pages SET image_status = ?, image_error = ? WHERE id = ?",
+        (status, (error[:500] if error else None), page_id),
+    )
 
 
 def _load_image_bytes(static_url: str | None) -> bytes | None:
@@ -473,6 +490,177 @@ async def generate_page_prompts(project_id: int, ws_manager: ConnectionManager |
 # Stage 4: Page images (17 parallel, using already-generated reference)
 # ============================================================
 
+async def _generate_one_page(
+    project: dict, page: dict, *,
+    image_provider, reference_images: list[bytes],
+    aspect_ratio: str, image_size: str,
+    upload_dir: str, ws_manager: ConnectionManager | None,
+) -> bool:
+    """Generate a single page image and persist it. Returns True on success.
+
+    Sets `pages.image_status` and `pages.image_error` in all paths so the UI
+    always reflects reality, and broadcasts per-page progress via WS.
+    """
+    project_id = project["id"]
+    page_id = page["id"]
+    page_num = page["page_number"]
+
+    # Mark generating + broadcast
+    db0 = await get_db()
+    try:
+        await _set_page_image_status(db0, page_id, IMG_GENERATING)
+        await db0.commit()
+    finally:
+        await db0.close()
+
+    if ws_manager:
+        await ws_manager.send_to_project(project_id, {
+            "type": "image_progress",
+            "page_number": page_num,
+            "page_id": page_id,
+            "status": "generating",
+        })
+
+    # Small jitter so N parallel calls don't hit the API in the exact same tick.
+    await asyncio.sleep(random.uniform(0, 0.2))
+
+    try:
+        image_bytes = await image_provider.generate_image(
+            page["image_prompt"],
+            reference_images=reference_images,
+            aspect_ratio=aspect_ratio, image_size=image_size,
+        )
+
+        new_version = (page.get("version") or 0) + 1
+        filename = f"page_{page_num}_v{new_version}.png"
+        filepath = os.path.join(upload_dir, filename)
+        with open(filepath, "wb") as f:
+            f.write(image_bytes)
+        image_path = f"/static/uploads/{project_id}/{filename}"
+
+        db = await get_db()
+        try:
+            await db.execute(
+                "UPDATE pages SET current_image_path = ?, version = ? WHERE id = ?",
+                (image_path, new_version, page_id),
+            )
+            await _set_page_image_status(db, page_id, IMG_DONE)
+            await db.execute(
+                """INSERT INTO image_versions
+                   (page_id, project_id, kind, image_path, prompt_used, provider, version_number)
+                   VALUES (?, ?, 'page', ?, ?, ?, ?)""",
+                (page_id, project_id, image_path, page["image_prompt"],
+                 project.get("image_provider", "nano_banana"), new_version),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+
+        if ws_manager:
+            await ws_manager.send_to_project(project_id, {
+                "type": "image_progress",
+                "page_number": page_num,
+                "page_id": page_id,
+                "status": "completed",
+                "image_path": image_path,
+                "version": new_version,
+            })
+        return True
+    except Exception as e:
+        err = str(e) or type(e).__name__
+        logger.error("Image gen failed page %d: %s", page_num, err, exc_info=True)
+        db = await get_db()
+        try:
+            await _set_page_image_status(db, page_id, IMG_FAILED, err)
+            await db.commit()
+        finally:
+            await db.close()
+        if ws_manager:
+            await ws_manager.send_to_project(project_id, {
+                "type": "image_progress",
+                "page_number": page_num,
+                "page_id": page_id,
+                "status": "failed",
+                "error": err,
+            })
+        return False
+
+
+async def _run_page_batch(
+    project_id: int, pages: list[dict], ws_manager: ConnectionManager | None,
+) -> tuple[int, int]:
+    """Run the given pages through the image provider under the shared
+    concurrency semaphore. Returns (completed, failed) counts."""
+    project = await _get_project(project_id)
+    image_provider = await get_image_provider(
+        project.get("image_provider"), project.get("image_model"),
+    )
+    semaphore = asyncio.Semaphore(settings.IMAGE_CONCURRENCY)
+    aspect_ratio = await get_setting_value("image_aspect_ratio") or "1:1"
+    image_size = await get_setting_value("image_size") or "1K"
+
+    upload_dir = str(UPLOADS_DIR / str(project_id))
+    os.makedirs(upload_dir, exist_ok=True)
+    reference_images = _build_reference_images(project, include_character=True)
+
+    completed = 0
+    failed = 0
+
+    async def guarded(page: dict):
+        nonlocal completed, failed
+        if not page.get("image_prompt"):
+            return
+        async with semaphore:
+            ok = await _generate_one_page(
+                project, page,
+                image_provider=image_provider,
+                reference_images=reference_images,
+                aspect_ratio=aspect_ratio, image_size=image_size,
+                upload_dir=upload_dir, ws_manager=ws_manager,
+            )
+            if ok:
+                completed += 1
+            else:
+                failed += 1
+
+    await asyncio.gather(*[guarded(p) for p in pages])
+    return completed, failed
+
+
+async def _finalize_image_batch(
+    project_id: int, ws_manager: ConnectionManager | None,
+):
+    """Decide the terminal project status based on per-page image_status.
+    - all 17 content pages done → STATUS_REVIEW
+    - some done / some failed-or-pending → STATUS_IMAGES_PARTIAL
+    - none done → STATUS_PROMPTS_GENERATED (back to gate)
+    """
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT image_status, image_prompt
+               FROM pages WHERE project_id = ?""",
+            (project_id,),
+        )
+        rows = list(await cursor.fetchall())
+    finally:
+        await db.close()
+
+    with_prompts = [r for r in rows if r["image_prompt"]]
+    done = sum(1 for r in with_prompts if r["image_status"] == IMG_DONE)
+    total = len(with_prompts)
+
+    if total > 0 and done == total:
+        status = STATUS_REVIEW
+    elif done > 0:
+        status = STATUS_IMAGES_PARTIAL
+    else:
+        status = STATUS_PROMPTS_GENERATED
+
+    await _update_project_status(project_id, status)
+    await _broadcast_status(ws_manager, project_id, status)
+
+
 async def generate_images(project_id: int, ws_manager: ConnectionManager):
     project = await _get_project(project_id)
 
@@ -484,7 +672,6 @@ async def generate_images(project_id: int, ws_manager: ConnectionManager):
 
     await _update_project_status(project_id, STATUS_IMAGES_GENERATING)
     await _broadcast_status(ws_manager, project_id, STATUS_IMAGES_GENERATING)
-    project = await _get_project(project_id)
 
     db = await get_db()
     try:
@@ -496,98 +683,50 @@ async def generate_images(project_id: int, ws_manager: ConnectionManager):
     finally:
         await db.close()
 
-    image_provider = await get_image_provider(project.get("image_provider"), project.get("image_model"))
-    semaphore = asyncio.Semaphore(settings.IMAGE_CONCURRENCY)
-    completed_count = 0
-    failed_count = 0
+    await _run_page_batch(project_id, pages, ws_manager)
+    await _finalize_image_batch(project_id, ws_manager)
 
-    aspect_ratio = await get_setting_value("image_aspect_ratio") or "1:1"
-    image_size = await get_setting_value("image_size") or "1K"
 
-    upload_dir = str(UPLOADS_DIR / str(project_id))
-    os.makedirs(upload_dir, exist_ok=True)
+async def retry_failed_images(
+    project_id: int, ws_manager: ConnectionManager | None = None,
+) -> dict:
+    """Re-run image generation only for pages where image_status != 'done'.
+    Usable from STATUS_IMAGES_PARTIAL or STATUS_REVIEW (in case user added a
+    page manually), never from an in-progress state."""
+    project = await _get_project(project_id)
+    if project["status"] in (STATUS_IMAGES_GENERATING,):
+        raise ValueError(
+            f"Cannot retry: generation already in progress"
+        )
+    if project["status"] not in (STATUS_IMAGES_PARTIAL, STATUS_REVIEW,
+                                  STATUS_PROMPTS_GENERATED):
+        raise ValueError(
+            f"Cannot retry images: project status is '{project['status']}'"
+        )
 
-    # Load style guide + character reference once
-    reference_images = _build_reference_images(project, include_character=True)
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT * FROM pages
+               WHERE project_id = ?
+                 AND image_prompt IS NOT NULL
+                 AND image_status != ?
+               ORDER BY page_number""",
+            (project_id, IMG_DONE),
+        )
+        pages = [{k: r[k] for k in r.keys()} for r in await cursor.fetchall()]
+    finally:
+        await db.close()
 
-    async def generate_one(page: dict):
-        nonlocal completed_count, failed_count
-        if not page.get("image_prompt"):
-            return
+    if not pages:
+        return await _get_project(project_id)
 
-        async with semaphore:
-            page_num = page["page_number"]
-            page_id = page["id"]
+    await _update_project_status(project_id, STATUS_IMAGES_GENERATING)
+    await _broadcast_status(ws_manager, project_id, STATUS_IMAGES_GENERATING)
 
-            await ws_manager.send_to_project(project_id, {
-                "type": "image_progress",
-                "page_number": page_num,
-                "page_id": page_id,
-                "status": "generating",
-            })
-
-            # Small jitter so N parallel calls don't hit the API in the exact same tick.
-            await asyncio.sleep(random.uniform(0, 0.2))
-
-            try:
-                image_bytes = await image_provider.generate_image(
-                    page["image_prompt"],
-                    reference_images=reference_images,
-                    aspect_ratio=aspect_ratio, image_size=image_size,
-                )
-
-                new_version = page["version"] + 1
-                filename = f"page_{page_num}_v{new_version}.png"
-                filepath = os.path.join(upload_dir, filename)
-                with open(filepath, "wb") as f:
-                    f.write(image_bytes)
-                image_path = f"/static/uploads/{project_id}/{filename}"
-
-                db2 = await get_db()
-                try:
-                    await db2.execute(
-                        "UPDATE pages SET current_image_path = ?, version = ? WHERE id = ?",
-                        (image_path, new_version, page_id),
-                    )
-                    await db2.execute(
-                        """INSERT INTO image_versions
-                           (page_id, project_id, kind, image_path, prompt_used, provider, version_number)
-                           VALUES (?, ?, 'page', ?, ?, ?, ?)""",
-                        (page_id, project_id, image_path, page["image_prompt"],
-                         project.get("image_provider", "nano_banana"), new_version),
-                    )
-                    await db2.commit()
-                finally:
-                    await db2.close()
-
-                await ws_manager.send_to_project(project_id, {
-                    "type": "image_progress",
-                    "page_number": page_num,
-                    "page_id": page_id,
-                    "status": "completed",
-                    "image_path": image_path,
-                    "version": new_version,
-                })
-                completed_count += 1
-            except Exception as e:
-                logger.error("Image gen failed page %d: %s", page_num, e, exc_info=True)
-                await ws_manager.send_to_project(project_id, {
-                    "type": "image_progress",
-                    "page_number": page_num,
-                    "page_id": page_id,
-                    "status": "failed",
-                    "error": str(e),
-                })
-                failed_count += 1
-
-    await asyncio.gather(*[generate_one(p) for p in pages])
-
-    if completed_count > 0:
-        await _update_project_status(project_id, STATUS_REVIEW)
-        await _broadcast_status(ws_manager, project_id, STATUS_REVIEW)
-    else:
-        await _update_project_status(project_id, STATUS_PROMPTS_GENERATED)
-        await _broadcast_status(ws_manager, project_id, STATUS_PROMPTS_GENERATED)
+    await _run_page_batch(project_id, pages, ws_manager)
+    await _finalize_image_batch(project_id, ws_manager)
+    return await _get_project(project_id)
 
 
 # ============================================================
@@ -624,11 +763,33 @@ async def regenerate_single_image(page_id: int, prompt: str | None = None) -> di
     aspect_ratio = await get_setting_value("image_aspect_ratio") or "1:1"
     image_size = await get_setting_value("image_size") or "1K"
 
-    image_bytes = await image_provider.generate_image(
-        page["image_prompt"],
-        reference_images=reference_images,
-        aspect_ratio=aspect_ratio, image_size=image_size,
-    )
+    # Mark as generating so UI shows the spinner even for the one-off regen path.
+    db = await get_db()
+    try:
+        await _set_page_image_status(db, page_id, IMG_GENERATING)
+        await db.commit()
+    finally:
+        await db.close()
+
+    try:
+        image_bytes = await image_provider.generate_image(
+            page["image_prompt"],
+            reference_images=reference_images,
+            aspect_ratio=aspect_ratio, image_size=image_size,
+        )
+    except Exception as e:
+        err = str(e) or type(e).__name__
+        logger.error(
+            "regenerate_single_image failed page %d: %s", page_id, err,
+            exc_info=True,
+        )
+        db = await get_db()
+        try:
+            await _set_page_image_status(db, page_id, IMG_FAILED, err)
+            await db.commit()
+        finally:
+            await db.close()
+        raise
 
     new_version = page["version"] + 1
     upload_dir = str(UPLOADS_DIR / str(page["project_id"]))
@@ -645,6 +806,7 @@ async def regenerate_single_image(page_id: int, prompt: str | None = None) -> di
             "UPDATE pages SET current_image_path = ?, version = ? WHERE id = ?",
             (image_path, new_version, page_id),
         )
+        await _set_page_image_status(db, page_id, IMG_DONE)
         await db.execute(
             """INSERT INTO image_versions
                (page_id, project_id, kind, image_path, prompt_used, provider, version_number)

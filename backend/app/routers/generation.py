@@ -22,6 +22,7 @@ from ..services.story_service import (
     generate_page_prompts,
     generate_images,
     regenerate_single_image,
+    retry_failed_images,
 )
 from ..services.ws_manager import ConnectionManager
 
@@ -43,7 +44,9 @@ def _handle_error(e: Exception):
         raise HTTPException(404, msg)
     if "Cannot" in msg or "oczekiwano" in msg.lower() or "expected" in msg.lower():
         raise HTTPException(409, msg)
-    raise HTTPException(500, msg)
+    # Log full traceback — otherwise 500s are invisible to ops.
+    logger.exception("Generation endpoint failed: %s", e)
+    raise HTTPException(500, msg or type(e).__name__)
 
 
 def _busy_409() -> HTTPException:
@@ -180,6 +183,33 @@ async def api_generate_images(project_id: int):
     return {"status": "started"}
 
 
+@router.post(
+    "/projects/{project_id}/retry-failed-images", status_code=202,
+)
+async def api_retry_failed_images(project_id: int):
+    """Re-run generation only for pages whose image_status != 'done'.
+    Fire-and-forget, progress via WS — same shape as generate-images."""
+    if not ws_manager:
+        raise HTTPException(500, "WebSocket manager not initialized")
+
+    if is_project_busy(project_id):
+        raise _busy_409()
+
+    async def _run():
+        try:
+            async with project_busy(project_id):
+                await retry_failed_images(project_id, ws_manager=ws_manager)
+        except ProjectBusyError:
+            pass
+        except Exception:
+            logger.exception(
+                "retry_failed_images task crashed for project %d", project_id,
+            )
+
+    asyncio.create_task(_run())
+    return {"status": "started"}
+
+
 @router.post("/pages/{page_id}/regenerate-image", response_model=PageResponse)
 async def api_regenerate_image(
     page_id: int, body: RegenerateRequest | None = None,
@@ -196,9 +226,34 @@ async def api_regenerate_image(
         _handle_error(e)
 
 
+def _extract_ws_token(websocket: WebSocket) -> tuple[str | None, str | None]:
+    """Return (token, subprotocol-to-echo).
+
+    Preferred: token passed via `Sec-WebSocket-Protocol` as `jwt.<token>` —
+    never appears in URLs, access logs, or browser history.
+    Fallback: `?token=` query param (legacy clients) — still accepted but
+    logged as deprecated so we can drop it once frontend is updated.
+    """
+    protocols_hdr = websocket.headers.get("sec-websocket-protocol", "")
+    for p in (s.strip() for s in protocols_hdr.split(",")):
+        if p.startswith("jwt."):
+            return p[len("jwt."):], p
+
+    legacy = websocket.query_params.get("token")
+    if legacy:
+        logger.warning(
+            "WS token passed via URL query param for project %s — client "
+            "should switch to Sec-WebSocket-Protocol 'jwt.<token>'",
+            websocket.path_params.get("project_id"),
+        )
+        return legacy, None
+
+    return None, None
+
+
 @ws_router.websocket("/ws/generation/{project_id}")
 async def generation_ws(websocket: WebSocket, project_id: int):
-    token = websocket.query_params.get("token")
+    token, subprotocol = _extract_ws_token(websocket)
     if not token:
         await websocket.close(code=4001)
         return
@@ -210,6 +265,13 @@ async def generation_ws(websocket: WebSocket, project_id: int):
     if not ws_manager:
         await websocket.close()
         return
+
+    # Echo the subprotocol back so the browser accepts the handshake.
+    if subprotocol:
+        await websocket.accept(subprotocol=subprotocol)
+    else:
+        await websocket.accept()
+
     await ws_manager.connect(project_id, websocket)
     try:
         while True:

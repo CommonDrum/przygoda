@@ -58,6 +58,8 @@ async def init_db():
                 current_image_path TEXT,
                 reference_image_path TEXT,
                 version INTEGER DEFAULT 0,
+                image_status TEXT NOT NULL DEFAULT 'pending',
+                image_error TEXT,
                 UNIQUE(project_id, page_number)
             );
 
@@ -112,6 +114,8 @@ async def init_db():
             ("projects", "style_guide_image_path", "TEXT"),
             ("image_versions", "project_id", "INTEGER"),
             ("image_versions", "kind", "TEXT NOT NULL DEFAULT 'page'"),
+            ("pages", "image_status", "TEXT NOT NULL DEFAULT 'pending'"),
+            ("pages", "image_error", "TEXT"),
         ]
         for table, col, coltype in migrations:
             try:
@@ -125,6 +129,15 @@ async def init_db():
         # Rebuild image_versions if an old schema left page_id NOT NULL
         # (reference-kind rows don't have a page_id, so inserts would fail).
         await _ensure_image_versions_nullable_page_id(db)
+
+        # Backfill image_status for pages from pre-status migration: anything
+        # that already has an image is done; the rest stays pending.
+        await db.execute(
+            """UPDATE pages SET image_status = 'done'
+               WHERE image_status = 'pending'
+                 AND current_image_path IS NOT NULL"""
+        )
+        await db.commit()
 
         # Seed prompts library from legacy settings if empty
         await _seed_prompts_from_settings(db)

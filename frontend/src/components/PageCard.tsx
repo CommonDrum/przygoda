@@ -38,6 +38,23 @@ export default function PageCard({
             alt={pageLabel(page)}
             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
           />
+        ) : page.image_status === "failed" ? (
+          <div
+            className="flex flex-col items-center gap-1.5 text-rose-600 px-3 text-center"
+            title={page.image_error || "Generowanie nie powiodło się"}
+          >
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 8v4" />
+              <path d="M12 16h.01" />
+            </svg>
+            <span className="text-xs font-semibold">Błąd generowania</span>
+            {page.image_error && (
+              <span className="text-[10px] text-rose-500 line-clamp-2">
+                {page.image_error}
+              </span>
+            )}
+          </div>
         ) : (
           <div className="flex flex-col items-center gap-1.5 text-bark-300">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">

@@ -8,7 +8,9 @@ class ConnectionManager:
         self.connections: dict[int, list[WebSocket]] = {}
 
     async def connect(self, project_id: int, ws: WebSocket):
-        await ws.accept()
+        """Register an already-accepted websocket. The handler is responsible
+        for calling `accept()` (possibly with a subprotocol) so it stays in
+        control of auth-ticket echoing."""
         self.connections.setdefault(project_id, []).append(ws)
 
     def disconnect(self, project_id: int, ws: WebSocket):

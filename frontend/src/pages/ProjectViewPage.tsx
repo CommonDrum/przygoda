@@ -22,6 +22,7 @@ import {
   getReferenceVersions,
   restorePageVersion,
   restoreReference,
+  retryFailedImages,
   updateProject,
   uploadReferenceImage,
 } from "../lib/api";
@@ -123,11 +124,29 @@ export default function ProjectViewPage() {
                         ...p,
                         current_image_path: msg.image_path!,
                         version: msg.version ?? p.version + 1,
+                        image_status: "done",
+                        image_error: null,
                       }
                     : p,
                 ),
               );
             }
+          } else if (msg.status === "failed" && msg.page_number > 0) {
+            setPages((prev) =>
+              prev.map((p) =>
+                p.page_number === msg.page_number
+                  ? { ...p, image_status: "failed", image_error: msg.error || "Błąd" }
+                  : p,
+              ),
+            );
+          } else if (msg.status === "generating" && msg.page_number > 0) {
+            setPages((prev) =>
+              prev.map((p) =>
+                p.page_number === msg.page_number
+                  ? { ...p, image_status: "generating" }
+                  : p,
+              ),
+            );
           }
         } else if (msg.type === "text_stream" && msg.chunk) {
           setStreamingPhase(msg.phase || null);
@@ -210,6 +229,12 @@ export default function ProjectViewPage() {
       setProject((prev) => (prev ? { ...prev, status: "images_generating" } : prev));
     }).catch(() => {});
 
+  const handleRetryFailed = () =>
+    runAction(async () => {
+      await retryFailedImages(projectId);
+      setProject((prev) => (prev ? { ...prev, status: "images_generating" } : prev));
+    }).catch(() => {});
+
   const handleFulfillmentChange = async (next: FulfillmentStatus) => {
     if (!project) return;
     setProject({ ...project, fulfillment_status: next });
@@ -265,6 +290,13 @@ export default function ProjectViewPage() {
     .length;
   const failedImages = Object.values(imageStatuses).filter((s) => s === "failed").length;
   const showProgress = project.status === "images_generating";
+
+  // Source of truth for "how many are actually done" — image_status persists
+  // across refreshes, unlike imageStatuses which only reflects this session.
+  const contentPages = pages.filter((p) => p.image_prompt);
+  const donePages = contentPages.filter((p) => p.image_status === "done").length;
+  const failedPages = contentPages.filter((p) => p.image_status === "failed").length;
+  const missingPages = contentPages.length - donePages;
 
   return (
     <div className="animate-enter">
@@ -441,6 +473,18 @@ export default function ProjectViewPage() {
           </button>
         )}
 
+        {project.status === "images_partial" && (
+          <button
+            onClick={handleRetryFailed}
+            disabled={actionLoading || missingPages === 0}
+            className="btn-primary"
+          >
+            {actionLoading
+              ? "Start..."
+              : `Ponów brakujące (${missingPages})`}
+          </button>
+        )}
+
         {(project.status === "review" || project.status === "exported") && (
           <>
             <button
@@ -548,6 +592,31 @@ export default function ProjectViewPage() {
         </div>
       )}
 
+      {/* Partial state banner — some pages failed, one-click retry */}
+      {project.status === "images_partial" && (
+        <div className="mb-6 card-storybook p-5 border-l-4 border-l-rose-400 animate-enter">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2.5 mb-1">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-rose-500">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 8v4" />
+                  <path d="M12 16h.01" />
+                </svg>
+                <span className="font-display font-bold text-bark-700">
+                  {donePages}/{contentPages.length} stron gotowych
+                </span>
+              </div>
+              <p className="text-sm text-bark-400">
+                {failedPages > 0
+                  ? `${failedPages} ${failedPages === 1 ? "strona" : "strony"} nie wygenerowała się — kliknij poniżej, aby spróbować ponownie.`
+                  : "Część stron nie została wygenerowana."}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Pages grid */}
       <div className="grid gap-5 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
         {pages.map((page, i) => (
@@ -555,11 +624,13 @@ export default function ProjectViewPage() {
             <PageCard
               page={page}
               generating={
-                showProgress &&
-                imageStatuses[page.page_number] === "generating"
+                (showProgress &&
+                  imageStatuses[page.page_number] === "generating") ||
+                page.image_status === "generating"
               }
               showRegenerate={
                 project.status === "prompts_generated" ||
+                project.status === "images_partial" ||
                 project.status === "review" ||
                 project.status === "exported"
               }

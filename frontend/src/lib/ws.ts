@@ -21,8 +21,11 @@ export function connectWebSocket(
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = import.meta.env.DEV ? "localhost:8000" : window.location.host;
     const token = getToken();
+    // Pass JWT via Sec-WebSocket-Protocol so it never appears in access
+    // logs, referer headers, or browser history (previously `?token=` in URL).
     ws = new WebSocket(
-      `${protocol}//${host}/ws/generation/${projectId}?token=${token}`
+      `${protocol}//${host}/ws/generation/${projectId}`,
+      token ? [`jwt.${token}`] : undefined,
     );
 
     ws.onopen = () => {

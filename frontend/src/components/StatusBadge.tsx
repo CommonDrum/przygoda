@@ -12,6 +12,7 @@ const statusConfig: Record<
   prompts_generating: { label: "Prompty: w toku",      bg: "bg-amber-50",     text: "text-amber-700",  dot: "bg-amber-400", pulse: true },
   prompts_generated:  { label: "Prompty",              bg: "bg-purple-50",    text: "text-purple-700", dot: "bg-purple-400" },
   images_generating:  { label: "Obrazki: w toku",      bg: "bg-amber-50",     text: "text-amber-700",  dot: "bg-amber-400", pulse: true },
+  images_partial:     { label: "Obrazki: część brakuje", bg: "bg-rose-50",     text: "text-rose-700",   dot: "bg-rose-400" },
   review:             { label: "Podgląd",              bg: "bg-emerald-50",   text: "text-emerald-700", dot: "bg-emerald-400" },
   exported:           { label: "Wyeksportowano",       bg: "bg-teal-50",      text: "text-teal-700",   dot: "bg-teal-500" },
 };

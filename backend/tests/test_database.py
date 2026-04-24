@@ -93,7 +93,8 @@ class TestImageVersionsSchema:
             CREATE TABLE pages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                page_number INTEGER NOT NULL
+                page_number INTEGER NOT NULL,
+                current_image_path TEXT
             );
             CREATE TABLE image_versions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -160,6 +161,61 @@ class TestImageVersionsSchema:
         try:
             page_id = await _column(db, "image_versions", "page_id")
             assert page_id["notnull"] == 0
+        finally:
+            await db.close()
+
+    @pytest.mark.asyncio
+    async def test_image_status_backfilled_for_existing_rows(
+        self, tmp_path_factory, monkeypatch,
+    ):
+        """Pages with an existing image must end up image_status='done';
+        pages without must stay 'pending'. This is what lets the 'retry
+        failed' UI be accurate on legacy projects."""
+        db_path = str(tmp_path_factory.mktemp("bf") / "bf.db")
+        monkeypatch.setattr(db_module, "DB_PATH", db_path)
+
+        legacy = await aiosqlite.connect(db_path)
+        legacy.row_factory = aiosqlite.Row
+        await legacy.executescript("""
+            CREATE TABLE projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                child_name TEXT NOT NULL,
+                child_age INTEGER NOT NULL
+            );
+            CREATE TABLE pages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                page_number INTEGER NOT NULL,
+                current_image_path TEXT
+            );
+        """)
+        cursor = await legacy.execute(
+            "INSERT INTO projects (child_name, child_age) VALUES ('Ola', 6)"
+        )
+        project_id = cursor.lastrowid
+        await legacy.execute(
+            "INSERT INTO pages (project_id, page_number, current_image_path) "
+            "VALUES (?, 1, '/static/ok.png')", (project_id,),
+        )
+        await legacy.execute(
+            "INSERT INTO pages (project_id, page_number, current_image_path) "
+            "VALUES (?, 2, NULL)", (project_id,),
+        )
+        await legacy.commit()
+        await legacy.close()
+
+        await db_module.init_db()
+
+        db = await db_module.get_db()
+        try:
+            cursor = await db.execute(
+                "SELECT page_number, image_status FROM pages "
+                "WHERE project_id = ? ORDER BY page_number",
+                (project_id,),
+            )
+            rows = list(await cursor.fetchall())
+            assert rows[0]["image_status"] == "done"
+            assert rows[1]["image_status"] == "pending"
         finally:
             await db.close()
 

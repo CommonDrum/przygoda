@@ -7,8 +7,11 @@ export type ProjectStatus =
   | "prompts_generating"
   | "prompts_generated"
   | "images_generating"
+  | "images_partial"
   | "review"
   | "exported";
+
+export type PageImageStatus = "pending" | "generating" | "done" | "failed";
 
 export type FulfillmentStatus =
   | "oczekuje"
@@ -128,6 +131,8 @@ export interface Page {
   current_image_path: string | null;
   reference_image_path: string | null;
   version: number;
+  image_status: PageImageStatus;
+  image_error: string | null;
 }
 
 export interface ImageVersion {

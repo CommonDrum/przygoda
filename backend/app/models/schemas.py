@@ -87,6 +87,9 @@ class ProjectResponse(BaseModel):
 
 # --- Pages ---
 
+ImageStatus = Literal["pending", "generating", "done", "failed"]
+
+
 class PageResponse(BaseModel):
     id: int
     project_id: int
@@ -97,6 +100,8 @@ class PageResponse(BaseModel):
     current_image_path: str | None = None
     reference_image_path: str | None = None
     version: int
+    image_status: ImageStatus = "pending"
+    image_error: str | None = None
 
 
 class PageUpdate(BaseModel):
