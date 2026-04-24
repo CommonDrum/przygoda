@@ -22,8 +22,6 @@ SETTING_KEYS = [
     "google_api_key",
     "default_llm_provider",
     "default_image_provider",
-    "story_system_prompt",
-    "image_system_prompt",
     "image_aspect_ratio",
     "image_size",
 ]

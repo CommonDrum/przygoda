@@ -6,6 +6,7 @@ import ProjectListPage from "./pages/ProjectListPage";
 import NewProjectPage from "./pages/NewProjectPage";
 import ProjectViewPage from "./pages/ProjectViewPage";
 import SettingsPage from "./pages/SettingsPage";
+import PromptsPage from "./pages/PromptsPage";
 import LoginPage from "./pages/LoginPage";
 
 function ProtectedRoute() {
@@ -25,6 +26,7 @@ export default function App() {
               <Route path="/" element={<ProjectListPage />} />
               <Route path="/new" element={<NewProjectPage />} />
               <Route path="/project/:id" element={<ProjectViewPage />} />
+              <Route path="/prompts" element={<PromptsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
           </Route>

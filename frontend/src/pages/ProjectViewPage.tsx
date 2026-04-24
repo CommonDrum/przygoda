@@ -1,14 +1,30 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
-import type { Project, Page, WsMessage } from "../lib/types";
+import type {
+  ExportFormat,
+  FulfillmentStatus,
+  Page,
+  Project,
+  ProjectStatus,
+  WsMessage,
+} from "../lib/types";
+import { FULFILLMENT_LABELS, FULFILLMENT_ORDER } from "../lib/types";
 import {
-  getProject,
-  getPages,
-  generateStory,
-  generatePrompts,
-  generateImages,
+  approveReference,
   exportProject,
+  generateImages,
+  generatePrompts,
+  generateReference,
+  generateStory,
+  getPageVersions,
+  getPages,
+  getProject,
+  getReferenceVersions,
+  regenerateReference,
+  restorePageVersion,
+  restoreReference,
+  updateProject,
 } from "../lib/api";
 import { connectWebSocket } from "../lib/ws";
 import type { WsConnection, WsStatus } from "../lib/ws";
@@ -17,6 +33,13 @@ import StatusBadge from "../components/StatusBadge";
 import PageCard from "../components/PageCard";
 import EditProjectModal from "../components/EditProjectModal";
 import RegenerateModal from "../components/RegenerateModal";
+import ImageHistoryModal from "../components/ImageHistoryModal";
+
+type ImageProgressMap = Record<number, "generating" | "completed" | "failed">;
+
+type HistoryTarget =
+  | { kind: "page"; pageId: number; title: string; currentImagePath: string | null }
+  | { kind: "reference"; title: string; currentImagePath: string | null };
 
 export default function ProjectViewPage() {
   const { id } = useParams<{ id: string }>();
@@ -27,17 +50,16 @@ export default function ProjectViewPage() {
   const [pages, setPages] = useState<Page[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const [exportLoading, setExportLoading] = useState<"zip" | "excel" | null>(null);
+  const [exportLoading, setExportLoading] = useState<ExportFormat | null>(null);
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [regenPage, setRegenPage] = useState<Page | null>(null);
+  const [historyTarget, setHistoryTarget] = useState<HistoryTarget | null>(null);
   const [streamingText, setStreamingText] = useState("");
   const [streamingPhase, setStreamingPhase] = useState<string | null>(null);
   const streamRef = useRef<HTMLPreElement | null>(null);
 
-  const [imageStatuses, setImageStatuses] = useState<
-    Record<number, "generating" | "completed" | "failed">
-  >({});
+  const [imageStatuses, setImageStatuses] = useState<ImageProgressMap>({});
   const [wsStatus, setWsStatus] = useState<WsStatus>("connected");
   const wsRef = useRef<WsConnection | null>(null);
 
@@ -57,23 +79,52 @@ export default function ProjectViewPage() {
     return () => wsRef.current?.close();
   }, [load]);
 
-  // WebSocket — connect once per projectId
+  // WebSocket — connect once per projectId, rely on WS as source of truth.
   useEffect(() => {
     if (!projectId) return;
 
     const conn = connectWebSocket(
       projectId,
       (msg: WsMessage) => {
+        if (msg.type === "project_status" && msg.status) {
+          setProject((prev) =>
+            prev ? { ...prev, status: msg.status as ProjectStatus } : prev,
+          );
+          return;
+        }
+
         if (msg.type === "image_progress" && msg.page_number !== undefined) {
           setImageStatuses((prev) => ({
             ...prev,
             [msg.page_number!]: msg.status as "generating" | "completed" | "failed",
           }));
-          if (msg.status === "completed") {
+
+          if (msg.status === "completed" && msg.image_path) {
             if (msg.page_number === 0) {
-              getProject(projectId).then(setProject);
+              // Reference image — update project locally.
+              setProject((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      reference_image_path: msg.image_path!,
+                      reference_image_version:
+                        msg.version ?? prev.reference_image_version + 1,
+                    }
+                  : prev,
+              );
             } else {
-              getPages(projectId).then(setPages);
+              // Page image — update the page locally. No HTTP fetch.
+              setPages((prev) =>
+                prev.map((p) =>
+                  p.page_number === msg.page_number
+                    ? {
+                        ...p,
+                        current_image_path: msg.image_path!,
+                        version: msg.version ?? p.version + 1,
+                      }
+                    : p,
+                ),
+              );
             }
           }
         } else if (msg.type === "text_stream" && msg.chunk) {
@@ -96,21 +147,10 @@ export default function ProjectViewPage() {
     return () => conn.close();
   }, [projectId]);
 
-  useEffect(() => {
-    const completedCount = Object.values(imageStatuses).filter(
-      (s) => s === "completed"
-    ).length;
-    if (completedCount === 18 && project?.status === "images_generating") {
-      getProject(projectId).then(setProject);
-    }
-  }, [imageStatuses, project?.status, projectId]);
-
-  const handleAction = async (action: () => Promise<Project | void>) => {
+  const runAction = async <T,>(action: () => Promise<T>) => {
     setActionLoading(true);
     try {
-      const result = await action();
-      if (result && "id" in result) setProject(result);
-      load();
+      return await action();
     } catch (e: unknown) {
       let msg = "Nieznany błąd";
       if (axios.isAxiosError(e)) {
@@ -119,8 +159,63 @@ export default function ProjectViewPage() {
         msg = e.message;
       }
       addToast(msg, "error");
+      throw e;
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleGenerateReference = () =>
+    runAction(async () => {
+      const updated = await generateReference(projectId);
+      setProject(updated);
+    }).catch(() => {});
+
+  const handleRegenerateReference = () =>
+    runAction(async () => {
+      const updated = await regenerateReference(projectId);
+      setProject(updated);
+    }).catch(() => {});
+
+  const handleApproveReference = () =>
+    runAction(async () => {
+      const updated = await approveReference(projectId);
+      setProject(updated);
+    }).catch(() => {});
+
+  const handleGenerateStory = () =>
+    runAction(async () => {
+      const updated = await generateStory(projectId);
+      setProject(updated);
+      // Story text lives on pages — one fetch is OK here (just story completion,
+      // no streaming of page images)
+      const refreshed = await getPages(projectId);
+      setPages(refreshed);
+    }).catch(() => {});
+
+  const handleGeneratePrompts = () =>
+    runAction(async () => {
+      const updated = await generatePrompts(projectId);
+      setProject(updated);
+      const refreshed = await getPages(projectId);
+      setPages(refreshed);
+    }).catch(() => {});
+
+  const handleGenerateImages = () =>
+    runAction(async () => {
+      await generateImages(projectId);
+      setImageStatuses({});
+      setProject((prev) => (prev ? { ...prev, status: "images_generating" } : prev));
+    }).catch(() => {});
+
+  const handleFulfillmentChange = async (next: FulfillmentStatus) => {
+    if (!project) return;
+    setProject({ ...project, fulfillment_status: next });
+    try {
+      await updateProject(project.id, { fulfillment_status: next });
+    } catch {
+      addToast("Nie udało się zapisać statusu", "error");
+      load();
     }
   };
 
@@ -129,7 +224,22 @@ export default function ProjectViewPage() {
     if (page) setRegenPage(page);
   };
 
-  const handleExport = (format: "zip" | "excel") => {
+  const handleShowHistory = (pageId: number) => {
+    const page = pages.find((p) => p.id === pageId);
+    if (!page) return;
+    setHistoryTarget({
+      kind: "page",
+      pageId,
+      title: page.page_type === "cover"
+        ? "Okładka"
+        : page.page_type === "back"
+          ? "Tył okładki"
+          : `Strona ${page.page_number - 1}`,
+      currentImagePath: page.current_image_path,
+    });
+  };
+
+  const handleExport = (format: ExportFormat) => {
     setExportLoading(format);
     exportProject(projectId, format)
       .then((path) => {
@@ -148,12 +258,10 @@ export default function ProjectViewPage() {
     );
   }
 
-  const completedImages = Object.values(imageStatuses).filter(
-    (s) => s === "completed"
-  ).length;
-  const failedImages = Object.values(imageStatuses).filter(
-    (s) => s === "failed"
-  ).length;
+  const completedImages = Object.keys(imageStatuses)
+    .filter((k) => Number(k) > 0 && imageStatuses[Number(k)] === "completed")
+    .length;
+  const failedImages = Object.values(imageStatuses).filter((s) => s === "failed").length;
   const showProgress = project.status === "images_generating";
 
   return (
@@ -167,21 +275,43 @@ export default function ProjectViewPage() {
       </Link>
 
       {/* Header */}
-      <div className="flex items-start justify-between mb-8">
+      <div className="flex items-start justify-between mb-8 gap-4">
         <div className="flex items-start gap-4">
           {project.reference_image_path && (
-            <img
-              src={project.reference_image_path}
-              alt="Ref"
-              className="w-18 h-18 rounded-xl object-cover border-2 border-cream-300 shadow-md"
-              title="Obrazek referencyjny postaci"
-            />
-          )}
-          {showProgress && imageStatuses[0] === "generating" && !project.reference_image_path && (
-            <div className="w-18 h-18 rounded-xl border-2 border-cream-300 flex items-center justify-center bg-cream-200/60">
-              <div className="spinner-warm" style={{ width: "1.25rem", height: "1.25rem", borderWidth: "2px" }} />
+            <div className="relative">
+              <img
+                src={project.reference_image_path}
+                alt="Ref"
+                className="w-18 h-18 rounded-xl object-cover border-2 border-cream-300 shadow-md"
+                title="Obrazek referencyjny postaci"
+              />
+              {project.reference_image_version > 0 && (
+                <button
+                  onClick={() =>
+                    setHistoryTarget({
+                      kind: "reference",
+                      title: "Obrazek postaci",
+                      currentImagePath: project.reference_image_path,
+                    })
+                  }
+                  className="absolute -bottom-1 -right-1 bg-bark-700/80 text-cream-50 text-[10px] font-bold px-1.5 py-0.5 rounded-md hover:bg-bark-700 transition-colors"
+                  title="Historia"
+                >
+                  v{project.reference_image_version}
+                </button>
+              )}
             </div>
           )}
+          {(project.status === "ref_pic_generating" ||
+            (showProgress && imageStatuses[0] === "generating")) &&
+            !project.reference_image_path && (
+              <div className="w-18 h-18 rounded-xl border-2 border-cream-300 flex items-center justify-center bg-cream-200/60">
+                <div
+                  className="spinner-warm"
+                  style={{ width: "1.25rem", height: "1.25rem", borderWidth: "2px" }}
+                />
+              </div>
+            )}
           <div>
             <div className="flex items-center gap-2.5">
               <h1 className="text-2xl font-display font-bold text-bark-700">
@@ -205,58 +335,87 @@ export default function ProjectViewPage() {
             </p>
           </div>
         </div>
-        <StatusBadge status={project.status} />
+
+        <div className="flex flex-col items-end gap-2">
+          <StatusBadge status={project.status} />
+          <select
+            value={project.fulfillment_status}
+            onChange={(e) =>
+              handleFulfillmentChange(e.target.value as FulfillmentStatus)
+            }
+            className="text-xs font-semibold px-2 py-1 rounded-lg border border-bark-200 bg-white hover:bg-bark-50 transition-colors"
+            title="Status wysyłki"
+          >
+            {FULFILLMENT_ORDER.map((s) => (
+              <option key={s} value={s}>
+                {FULFILLMENT_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Actions */}
       <div className="flex gap-3 mb-8 flex-wrap">
         {project.status === "draft" && (
           <button
-            onClick={() => handleAction(() => generateStory(projectId))}
+            onClick={handleGenerateReference}
             disabled={actionLoading}
             className="btn-primary"
           >
-            {actionLoading ? (
-              <>
-                <div className="spinner-warm" style={{ width: "1rem", height: "1rem", borderWidth: "2px" }} />
-                Generowanie...
-              </>
-            ) : (
-              "Generuj historię"
-            )}
+            {actionLoading ? "Generowanie..." : "Generuj obraz postaci"}
           </button>
         )}
+
+        {project.status === "ref_pic_review" && (
+          <>
+            <button
+              onClick={handleRegenerateReference}
+              disabled={actionLoading}
+              className="btn-secondary"
+            >
+              {actionLoading ? "Generowanie..." : "Wygeneruj postać ponownie"}
+            </button>
+            <button
+              onClick={handleApproveReference}
+              disabled={actionLoading}
+              className="btn-primary"
+            >
+              Akceptuję — generuj historię
+            </button>
+          </>
+        )}
+
+        {project.status === "story_generating" && (
+          <button
+            onClick={handleGenerateStory}
+            disabled={actionLoading}
+            className="btn-primary"
+          >
+            {actionLoading ? "Generowanie..." : "Generuj historię"}
+          </button>
+        )}
+
         {project.status === "story_generated" && (
           <button
-            onClick={() => handleAction(() => generatePrompts(projectId))}
+            onClick={handleGeneratePrompts}
             disabled={actionLoading}
             className="btn-primary"
           >
-            {actionLoading ? (
-              <>
-                <div className="spinner-warm" style={{ width: "1rem", height: "1rem", borderWidth: "2px" }} />
-                Generowanie...
-              </>
-            ) : (
-              "Generuj opisy obrazków"
-            )}
+            {actionLoading ? "Generowanie..." : "Generuj opisy obrazków"}
           </button>
         )}
+
         {project.status === "prompts_generated" && (
           <button
-            onClick={() =>
-              handleAction(async () => {
-                await generateImages(projectId);
-                setImageStatuses({});
-                setProject({ ...project, status: "images_generating" });
-              })
-            }
+            onClick={handleGenerateImages}
             disabled={actionLoading}
             className="btn-primary"
           >
             {actionLoading ? "Start..." : "Generuj obrazki"}
           </button>
         )}
+
         {(project.status === "review" || project.status === "exported") && (
           <>
             <button
@@ -264,28 +423,21 @@ export default function ProjectViewPage() {
               disabled={exportLoading !== null}
               className="btn-amber"
             >
-              {exportLoading === "zip" ? (
-                <>
-                  <div className="spinner-warm" style={{ width: "1rem", height: "1rem", borderWidth: "2px", borderColor: "rgba(255,255,255,0.3)", borderTopColor: "white" }} />
-                  Eksport...
-                </>
-              ) : (
-                "Eksport ZIP"
-              )}
+              {exportLoading === "zip" ? "Eksport..." : "Eksport ZIP"}
+            </button>
+            <button
+              onClick={() => handleExport("txt")}
+              disabled={exportLoading !== null}
+              className="btn-amber"
+            >
+              {exportLoading === "txt" ? "Eksport..." : "Eksport TXT"}
             </button>
             <button
               onClick={() => handleExport("excel")}
               disabled={exportLoading !== null}
               className="btn-amber"
             >
-              {exportLoading === "excel" ? (
-                <>
-                  <div className="spinner-warm" style={{ width: "1rem", height: "1rem", borderWidth: "2px", borderColor: "rgba(255,255,255,0.3)", borderTopColor: "white" }} />
-                  Eksport...
-                </>
-              ) : (
-                "Eksport Excel"
-              )}
+              {exportLoading === "excel" ? "Eksport..." : "Eksport Excel"}
             </button>
           </>
         )}
@@ -295,13 +447,24 @@ export default function ProjectViewPage() {
       {actionLoading && (streamingText || streamingPhase !== null) && (
         <div className="mb-8 bg-bark-700 rounded-2xl p-5 shadow-lg border border-bark-600/30 animate-enter">
           <div className="flex items-center gap-2.5 mb-3">
-            <div className="spinner-warm" style={{ width: "1rem", height: "1rem", borderWidth: "2px", borderColor: "var(--color-bark-400)", borderTopColor: "var(--color-amber-400)" }} />
+            <div
+              className="spinner-warm"
+              style={{
+                width: "1rem",
+                height: "1rem",
+                borderWidth: "2px",
+                borderColor: "var(--color-bark-400)",
+                borderTopColor: "var(--color-amber-400)",
+              }}
+            />
             <span className="text-amber-400 text-sm font-semibold">
               {streamingPhase === "story"
                 ? "Tkanie historii..."
                 : streamingPhase === "prompts"
                   ? "Tworzenie opisów obrazków..."
-                  : "Generowanie..."}
+                  : streamingPhase === "reference"
+                    ? "Opisuję postać..."
+                    : "Generowanie..."}
             </span>
           </div>
           <pre
@@ -343,13 +506,13 @@ export default function ProjectViewPage() {
               </span>
             </div>
             <span className="text-sm text-bark-400 font-semibold">
-              {completedImages} / 18
+              {completedImages} / 17
             </span>
           </div>
           <div className="w-full bg-cream-300/60 rounded-full h-2 overflow-hidden">
             <div
               className="bg-gradient-to-r from-teal-500 to-teal-600 h-2 rounded-full transition-all duration-500 ease-out"
-              style={{ width: `${Math.round((completedImages / 18) * 100)}%` }}
+              style={{ width: `${Math.round((completedImages / 17) * 100)}%` }}
             />
           </div>
           {failedImages > 0 && (
@@ -373,7 +536,11 @@ export default function ProjectViewPage() {
               showRegenerate={
                 project.status === "review" || project.status === "exported"
               }
+              showHistory={
+                project.status === "review" || project.status === "exported"
+              }
               onRegenerate={handleRegenerate}
+              onShowHistory={handleShowHistory}
             />
           </div>
         ))}
@@ -403,6 +570,31 @@ export default function ProjectViewPage() {
             setRegenPage(null);
           }}
           onClose={() => setRegenPage(null)}
+        />
+      )}
+
+      {/* Image history modal */}
+      {historyTarget && (
+        <ImageHistoryModal
+          title={historyTarget.title}
+          currentImagePath={historyTarget.currentImagePath}
+          loadVersions={() =>
+            historyTarget.kind === "page"
+              ? getPageVersions(historyTarget.pageId)
+              : getReferenceVersions(projectId)
+          }
+          onRestore={async (versionId) => {
+            if (historyTarget.kind === "page") {
+              const updated = await restorePageVersion(historyTarget.pageId, versionId);
+              setPages((prev) =>
+                prev.map((p) => (p.id === updated.id ? updated : p))
+              );
+            } else {
+              const updated = await restoreReference(projectId, versionId);
+              setProject(updated);
+            }
+          }}
+          onClose={() => setHistoryTarget(null)}
         />
       )}
     </div>

@@ -2,8 +2,14 @@ import axios from "axios";
 import type {
   Project,
   ProjectCreateInput,
+  ProjectUpdateInput,
   Page,
   AppSettings,
+  Prompt,
+  PromptInput,
+  PromptKind,
+  ImageVersion,
+  ExportFormat,
 } from "./types";
 import { getToken, clearToken } from "./auth";
 
@@ -59,7 +65,7 @@ export async function createProject(
 
 export async function updateProject(
   id: number,
-  data: Partial<ProjectCreateInput>
+  data: ProjectUpdateInput
 ): Promise<Project> {
   const { data: result } = await api.put(`/projects/${id}`, data);
   return result;
@@ -76,7 +82,61 @@ export async function getPages(projectId: number): Promise<Page[]> {
   return data;
 }
 
+export async function getPageVersions(pageId: number): Promise<ImageVersion[]> {
+  const { data } = await api.get(`/pages/${pageId}/versions`);
+  return data;
+}
+
+export async function restorePageVersion(
+  pageId: number,
+  versionId: number
+): Promise<Page> {
+  const { data } = await api.post(`/pages/${pageId}/restore-version`, {
+    version_id: versionId,
+  });
+  return data;
+}
+
+export async function getReferenceVersions(
+  projectId: number
+): Promise<ImageVersion[]> {
+  const { data } = await api.get(`/projects/${projectId}/reference-versions`);
+  return data;
+}
+
+export async function restoreReference(
+  projectId: number,
+  versionId: number
+): Promise<Project> {
+  const { data } = await api.post(`/projects/${projectId}/restore-reference`, {
+    version_id: versionId,
+  });
+  return data;
+}
+
 // --- Generation ---
+
+export async function generateReference(projectId: number): Promise<Project> {
+  const { data } = await api.post(`/projects/${projectId}/generate-reference`);
+  return data;
+}
+
+export async function regenerateReference(
+  projectId: number,
+  prompt?: string
+): Promise<Project> {
+  const body = prompt !== undefined ? { prompt } : undefined;
+  const { data } = await api.post(
+    `/projects/${projectId}/regenerate-reference`,
+    body
+  );
+  return data;
+}
+
+export async function approveReference(projectId: number): Promise<Project> {
+  const { data } = await api.post(`/projects/${projectId}/approve-reference`);
+  return data;
+}
 
 export async function generateStory(projectId: number): Promise<Project> {
   const { data } = await api.post(`/projects/${projectId}/generate-story`);
@@ -105,7 +165,7 @@ export async function regenerateImage(
 
 export async function exportProject(
   projectId: number,
-  format: "zip" | "excel"
+  format: ExportFormat
 ): Promise<string> {
   const { data } = await api.post(`/projects/${projectId}/export`, { format });
   return data.file_path;
@@ -130,4 +190,30 @@ export async function validateApiKey(
 ): Promise<{ valid: boolean; error?: string }> {
   const { data } = await api.post("/settings/validate-key", { provider });
   return data;
+}
+
+// --- Prompts library ---
+
+export async function listPrompts(kind?: PromptKind): Promise<Prompt[]> {
+  const { data } = await api.get("/prompts", {
+    params: kind ? { kind } : undefined,
+  });
+  return data;
+}
+
+export async function createPrompt(input: PromptInput): Promise<Prompt> {
+  const { data } = await api.post("/prompts", input);
+  return data;
+}
+
+export async function updatePrompt(
+  id: number,
+  input: Partial<Pick<PromptInput, "title" | "content">>
+): Promise<Prompt> {
+  const { data } = await api.put(`/prompts/${id}`, input);
+  return data;
+}
+
+export async function deletePrompt(id: number): Promise<void> {
+  await api.delete(`/prompts/${id}`);
 }

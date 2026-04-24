@@ -1,16 +1,21 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from jose import JWTError
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 logger = logging.getLogger(__name__)
 
 from ..auth import verify_token
 from ..models.schemas import ProjectResponse, PageResponse, RegenerateRequest
 from ..services.story_service import (
+    generate_reference,
+    regenerate_reference,
+    approve_reference,
     generate_story,
-    generate_image_prompts,
+    generate_page_prompts,
     generate_images,
     regenerate_single_image,
 )
@@ -18,6 +23,8 @@ from ..services.ws_manager import ConnectionManager
 
 router = APIRouter(tags=["generation"])
 ws_router = APIRouter(tags=["websocket"])
+
+limiter = Limiter(key_func=get_remote_address)
 
 # Singleton — will be set from main.py
 ws_manager: ConnectionManager | None = None
@@ -32,16 +39,68 @@ def _handle_error(e: Exception):
     msg = str(e)
     if "not found" in msg.lower():
         raise HTTPException(404, msg)
-    if "Cannot generate" in msg:
+    if "Cannot" in msg or "oczekiwano" in msg.lower() or "expected" in msg.lower():
         raise HTTPException(409, msg)
     raise HTTPException(500, msg)
 
+
+# ---- Reference image stage ----
+
+@router.post(
+    "/projects/{project_id}/generate-reference",
+    response_model=ProjectResponse,
+)
+@limiter.limit("3/minute")
+async def api_generate_reference(project_id: int, request: Request):
+    try:
+        return await generate_reference(project_id, ws_manager=ws_manager)
+    except HTTPException:
+        raise
+    except Exception as e:
+        _handle_error(e)
+
+
+@router.post(
+    "/projects/{project_id}/regenerate-reference",
+    response_model=ProjectResponse,
+)
+@limiter.limit("6/minute")
+async def api_regenerate_reference(
+    project_id: int, request: Request, body: RegenerateRequest | None = None,
+):
+    try:
+        return await regenerate_reference(
+            project_id, ws_manager=ws_manager,
+            new_prompt=(body.prompt if body else None),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        _handle_error(e)
+
+
+@router.post(
+    "/projects/{project_id}/approve-reference",
+    response_model=ProjectResponse,
+)
+@limiter.limit("10/minute")
+async def api_approve_reference(project_id: int, request: Request):
+    try:
+        return await approve_reference(project_id, ws_manager=ws_manager)
+    except HTTPException:
+        raise
+    except Exception as e:
+        _handle_error(e)
+
+
+# ---- Story + page prompts ----
 
 @router.post(
     "/projects/{project_id}/generate-story",
     response_model=ProjectResponse,
 )
-async def api_generate_story(project_id: int):
+@limiter.limit("3/minute")
+async def api_generate_story(project_id: int, request: Request):
     try:
         return await generate_story(project_id, ws_manager=ws_manager)
     except HTTPException:
@@ -54,17 +113,21 @@ async def api_generate_story(project_id: int):
     "/projects/{project_id}/generate-prompts",
     response_model=ProjectResponse,
 )
-async def api_generate_prompts(project_id: int):
+@limiter.limit("3/minute")
+async def api_generate_prompts(project_id: int, request: Request):
     try:
-        return await generate_image_prompts(project_id, ws_manager=ws_manager)
+        return await generate_page_prompts(project_id, ws_manager=ws_manager)
     except HTTPException:
         raise
     except Exception as e:
         _handle_error(e)
 
 
+# ---- Page images ----
+
 @router.post("/projects/{project_id}/generate-images", status_code=202)
-async def api_generate_images(project_id: int):
+@limiter.limit("2/minute")
+async def api_generate_images(project_id: int, request: Request):
     if not ws_manager:
         raise HTTPException(500, "WebSocket manager not initialized")
 
@@ -95,7 +158,10 @@ async def api_generate_images(project_id: int):
 
 
 @router.post("/pages/{page_id}/regenerate-image", response_model=PageResponse)
-async def api_regenerate_image(page_id: int, body: RegenerateRequest | None = None):
+@limiter.limit("6/minute")
+async def api_regenerate_image(
+    page_id: int, request: Request, body: RegenerateRequest | None = None,
+):
     try:
         prompt = body.prompt if body else None
         return await regenerate_single_image(page_id, prompt=prompt)

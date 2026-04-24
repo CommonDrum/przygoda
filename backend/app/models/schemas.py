@@ -1,4 +1,9 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+
+FulfillmentStatus = Literal["oczekuje", "w_drukarni", "wyslane", "doreczone"]
 
 
 # --- Projects ---
@@ -15,6 +20,8 @@ class ProjectCreate(BaseModel):
     story_type: str = Field(min_length=1)
     hobby: str = Field(min_length=1)
     moral: str = Field(min_length=1)
+    story_prompt_id: int | None = None
+    image_prompt_id: int | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -31,6 +38,9 @@ class ProjectUpdate(BaseModel):
     moral: str | None = None
     llm_provider: str | None = None
     image_provider: str | None = None
+    story_prompt_id: int | None = None
+    image_prompt_id: int | None = None
+    fulfillment_status: FulfillmentStatus | None = None
 
 
 class RegenerateRequest(BaseModel):
@@ -56,6 +66,10 @@ class ProjectResponse(BaseModel):
     image_provider: str
     reference_image_prompt: str | None = None
     reference_image_path: str | None = None
+    reference_image_version: int = 0
+    story_prompt_id: int | None = None
+    image_prompt_id: int | None = None
+    fulfillment_status: FulfillmentStatus = "oczekuje"
     status: str
     created_at: str
     updated_at: str
@@ -84,7 +98,9 @@ class PageUpdate(BaseModel):
 
 class ImageVersionResponse(BaseModel):
     id: int
-    page_id: int
+    page_id: int | None = None
+    project_id: int | None = None
+    kind: str = "page"
     image_path: str
     prompt_used: str
     provider: str
@@ -92,10 +108,37 @@ class ImageVersionResponse(BaseModel):
     created_at: str
 
 
+class RestoreVersionRequest(BaseModel):
+    version_id: int
+
+
+# --- Prompts library ---
+
+class PromptCreate(BaseModel):
+    kind: Literal["story", "image"]
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1)
+
+
+class PromptUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    content: str | None = Field(default=None, min_length=1)
+
+
+class PromptResponse(BaseModel):
+    id: int
+    kind: Literal["story", "image"]
+    title: str
+    content: str
+    is_default: bool
+    created_at: str
+    updated_at: str
+
+
 # --- Export ---
 
 class ExportRequest(BaseModel):
-    format: str = Field(pattern=r"^(zip|excel)$")
+    format: str = Field(pattern=r"^(zip|excel|txt)$")
 
 
 class ExportResponse(BaseModel):
@@ -111,8 +154,6 @@ class SettingsUpdate(BaseModel):
     google_api_key: str | None = None
     default_llm_provider: str | None = None
     default_image_provider: str | None = None
-    story_system_prompt: str | None = None
-    image_system_prompt: str | None = None
     image_aspect_ratio: str | None = None
     image_size: str | None = None
 
@@ -124,8 +165,6 @@ class SettingsResponse(BaseModel):
     google_api_key: str = ""
     default_llm_provider: str = "anthropic"
     default_image_provider: str = "nano_banana"
-    story_system_prompt: str = ""
-    image_system_prompt: str = ""
     image_aspect_ratio: str = "1:1"
     image_size: str = "1K"
 

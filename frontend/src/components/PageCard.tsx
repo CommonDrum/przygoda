@@ -10,14 +10,18 @@ interface Props {
   page: Page;
   generating?: boolean;
   showRegenerate?: boolean;
+  showHistory?: boolean;
   onRegenerate?: (pageId: number) => void;
+  onShowHistory?: (pageId: number) => void;
 }
 
 export default function PageCard({
   page,
   generating,
   showRegenerate,
+  showHistory,
   onRegenerate,
+  onShowHistory,
 }: Props) {
   return (
     <div className="card-storybook overflow-hidden group">
@@ -64,12 +68,23 @@ export default function PageCard({
           </p>
         )}
         {showRegenerate && onRegenerate && (
-          <button
-            onClick={() => onRegenerate(page.id)}
-            className="mt-2.5 w-full text-xs bg-teal-500/8 text-teal-600 hover:bg-teal-500/15 py-1.5 rounded-lg font-semibold transition-colors duration-200"
-          >
-            Regeneruj obrazek
-          </button>
+          <div className="mt-2.5 flex gap-1.5">
+            <button
+              onClick={() => onRegenerate(page.id)}
+              className="flex-1 text-xs bg-teal-500/8 text-teal-600 hover:bg-teal-500/15 py-1.5 rounded-lg font-semibold transition-colors duration-200"
+            >
+              Regeneruj
+            </button>
+            {showHistory && onShowHistory && page.version > 0 && (
+              <button
+                onClick={() => onShowHistory(page.id)}
+                title="Historia wersji"
+                className="px-2.5 text-xs bg-bark-200/40 text-bark-500 hover:bg-bark-200/60 py-1.5 rounded-lg font-semibold transition-colors duration-200"
+              >
+                Historia ({page.version})
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

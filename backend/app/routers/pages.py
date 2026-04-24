@@ -1,7 +1,13 @@
 from fastapi import APIRouter, HTTPException
 
 from ..database import get_db
-from ..models.schemas import PageResponse, PageUpdate, ImageVersionResponse
+from ..models.schemas import (
+    PageResponse,
+    PageUpdate,
+    ImageVersionResponse,
+    ProjectResponse,
+    RestoreVersionRequest,
+)
 
 router = APIRouter(tags=["pages"])
 
@@ -89,5 +95,85 @@ async def list_versions(page_id: int):
         )
         rows = await cursor.fetchall()
         return [row_to_dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.post("/pages/{page_id}/restore-version", response_model=PageResponse)
+async def restore_version(page_id: int, data: RestoreVersionRequest):
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT * FROM image_versions WHERE id = ? AND page_id = ?",
+            (data.version_id, page_id),
+        )
+        version = await cursor.fetchone()
+        if not version:
+            raise HTTPException(404, "Wersja nie znaleziona dla tej strony")
+
+        await db.execute(
+            "UPDATE pages SET current_image_path = ?, version = ? WHERE id = ?",
+            (version["image_path"], version["version_number"], page_id),
+        )
+        await db.commit()
+
+        cursor = await db.execute("SELECT * FROM pages WHERE id = ?", (page_id,))
+        return row_to_dict(await cursor.fetchone())
+    finally:
+        await db.close()
+
+
+# --- Reference image versions (attached to project, not a page) ---
+
+@router.get(
+    "/projects/{project_id}/reference-versions",
+    response_model=list[ImageVersionResponse],
+)
+async def list_reference_versions(project_id: int):
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT * FROM image_versions
+               WHERE project_id = ? AND kind = 'reference'
+               ORDER BY version_number DESC""",
+            (project_id,),
+        )
+        rows = await cursor.fetchall()
+        return [row_to_dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+@router.post(
+    "/projects/{project_id}/restore-reference", response_model=ProjectResponse
+)
+async def restore_reference(project_id: int, data: RestoreVersionRequest):
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """SELECT * FROM image_versions
+               WHERE id = ? AND project_id = ? AND kind = 'reference'""",
+            (data.version_id, project_id),
+        )
+        version = await cursor.fetchone()
+        if not version:
+            raise HTTPException(404, "Wersja referencyjna nie znaleziona")
+
+        await db.execute(
+            """UPDATE projects
+               SET reference_image_path = ?,
+                   reference_image_prompt = ?,
+                   reference_image_version = ?,
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE id = ?""",
+            (version["image_path"], version["prompt_used"],
+             version["version_number"], project_id),
+        )
+        await db.commit()
+
+        cursor = await db.execute(
+            "SELECT * FROM projects WHERE id = ?", (project_id,)
+        )
+        return row_to_dict(await cursor.fetchone())
     finally:
         await db.close()

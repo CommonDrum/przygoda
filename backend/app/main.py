@@ -3,12 +3,15 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi import _rate_limit_exceeded_handler
 
 from .auth import get_current_user
 from .config import settings as app_settings, STATIC_DIR, UPLOADS_DIR, EXPORTS_DIR
 from .database import init_db
 from .seed import seed_demo_project
-from .routers import projects, pages, settings, generation, exports, auth
+from .routers import projects, pages, settings, generation, exports, auth, prompts
 from .services.ws_manager import ConnectionManager
 
 
@@ -27,6 +30,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Przygoda", lifespan=lifespan)
 
+# Rate limiter — shared Limiter instance lives in generation.py
+app.state.limiter = generation.limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in app_settings.CORS_ORIGINS.split(",")],
@@ -40,6 +48,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.include_router(auth.router, prefix="/api")
 app.include_router(projects.router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(pages.router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(prompts.router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(settings.router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(generation.router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(generation.ws_router)  # WS — no /api prefix, auth via token query param

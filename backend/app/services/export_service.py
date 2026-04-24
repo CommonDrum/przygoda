@@ -77,6 +77,68 @@ async def export_zip(project_id: int) -> str:
     return file_url
 
 
+async def export_txt(project_id: int) -> str:
+    project, pages = await _get_project_and_pages(project_id)
+
+    export_dir = EXPORTS_DIR / str(project_id)
+    os.makedirs(export_dir, exist_ok=True)
+    txt_path = export_dir / f"{project['child_name']}_book.txt"
+
+    sep_heavy = "=" * 64
+    sep_light = "-" * 64
+
+    lines: list[str] = []
+    lines.append(
+        f"Imię: {project['child_name']}    Wiek: {project['child_age']}    "
+        f"Motyw: {project['story_type']}"
+    )
+    lines.append(
+        f"Hobby: {project.get('hobby', '')}    Przesłanie: {project.get('moral', '')}"
+    )
+    lines.append(f"Status wysyłki: {project.get('fulfillment_status', 'oczekuje')}")
+    if project.get("reference_image_prompt"):
+        lines.append("")
+        lines.append("PROMPT POSTACI (reference):")
+        lines.append(project["reference_image_prompt"])
+        if project.get("reference_image_path"):
+            lines.append(f"OBRAZEK POSTACI: {project['reference_image_path']}")
+    lines.append(sep_heavy)
+    lines.append("")
+
+    for page in pages:
+        page_num = page["page_number"]
+        page_type = page["page_type"]
+        lines.append(f"# Strona {page_num:02d} ({page_type})")
+        lines.append("")
+        lines.append("TEKST:")
+        lines.append(page.get("text") or "(brak)")
+        lines.append("")
+        lines.append("PROMPT OBRAZKA:")
+        lines.append(page.get("image_prompt") or "(brak)")
+        lines.append("")
+        img = page.get("current_image_path") or "(brak)"
+        lines.append(f"OBRAZEK: {img}")
+        lines.append("")
+        lines.append(sep_light)
+        lines.append("")
+
+    with open(str(txt_path), "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines))
+
+    db = await get_db()
+    try:
+        file_url = f"/static/exports/{project_id}/{project['child_name']}_book.txt"
+        await db.execute(
+            "INSERT INTO exports (project_id, format, file_path) VALUES (?, ?, ?)",
+            (project_id, "txt", file_url),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    return file_url
+
+
 async def export_excel(project_id: int) -> str:
     project, pages = await _get_project_and_pages(project_id)
 

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { ProjectCreateInput } from "../lib/types";
-import { createProject } from "../lib/api";
+import type { ProjectCreateInput, Prompt } from "../lib/types";
+import { createProject, listPrompts } from "../lib/api";
 import { useToast } from "../context/ToastContext";
 
 const defaults: ProjectCreateInput = {
@@ -16,6 +16,8 @@ const defaults: ProjectCreateInput = {
   story_type: "",
   hobby: "",
   moral: "",
+  story_prompt_id: null,
+  image_prompt_id: null,
 };
 
 export default function NewProjectPage() {
@@ -23,8 +25,27 @@ export default function NewProjectPage() {
   const { addToast } = useToast();
   const [form, setForm] = useState<ProjectCreateInput>({ ...defaults });
   const [submitting, setSubmitting] = useState(false);
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
 
-  const set = (field: keyof ProjectCreateInput, value: string | number) =>
+  useEffect(() => {
+    listPrompts()
+      .then((ps) => {
+        setPrompts(ps);
+        const storyDefault = ps.find((p) => p.kind === "story" && p.is_default);
+        const imageDefault = ps.find((p) => p.kind === "image" && p.is_default);
+        setForm((f) => ({
+          ...f,
+          story_prompt_id: storyDefault?.id ?? null,
+          image_prompt_id: imageDefault?.id ?? null,
+        }));
+      })
+      .catch(() => {});
+  }, []);
+
+  const storyPrompts = prompts.filter((p) => p.kind === "story");
+  const imagePrompts = prompts.filter((p) => p.kind === "image");
+
+  const set = (field: keyof ProjectCreateInput, value: string | number | null) =>
     setForm((prev) => ({ ...prev, [field]: value }));
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -187,6 +208,60 @@ export default function NewProjectPage() {
               placeholder="np. wiara w siebie, przyjaźń, odwaga"
               required
             />
+          </div>
+        </div>
+
+        {/* Prompts selection */}
+        <div className="card-storybook p-6 space-y-4">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-lg">✎</span>
+            <h2 className="font-display font-bold text-bark-600">
+              Master prompty
+            </h2>
+          </div>
+
+          <div>
+            <label className="label-warm">Prompt historii</label>
+            <select
+              className="input-warm"
+              value={form.story_prompt_id ?? ""}
+              onChange={(e) =>
+                set(
+                  "story_prompt_id",
+                  e.target.value ? Number(e.target.value) : null,
+                )
+              }
+            >
+              <option value="">— domyślny —</option>
+              {storyPrompts.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.title}
+                  {p.is_default ? " (domyślny)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="label-warm">Prompt obrazków</label>
+            <select
+              className="input-warm"
+              value={form.image_prompt_id ?? ""}
+              onChange={(e) =>
+                set(
+                  "image_prompt_id",
+                  e.target.value ? Number(e.target.value) : null,
+                )
+              }
+            >
+              <option value="">— domyślny —</option>
+              {imagePrompts.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.title}
+                  {p.is_default ? " (domyślny)" : ""}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 

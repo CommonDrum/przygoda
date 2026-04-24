@@ -37,6 +37,7 @@ export default function Layout() {
           </Link>
           <nav className="flex gap-1.5 items-center">
             {navLink("/", "Projekty", "\u2302")}
+            {navLink("/prompts", "Prompty", "\u270e")}
             {navLink("/settings", "Opcje", "\u2699")}
             <button
               onClick={() => { logout(); navigate("/login"); }}
