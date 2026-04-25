@@ -165,7 +165,6 @@ class ExportResponse(BaseModel):
 class SettingsUpdate(BaseModel):
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
-    nano_banana_api_key: str | None = None
     google_api_key: str | None = None
     default_llm_provider: str | None = None
     default_image_provider: str | None = None
@@ -176,16 +175,15 @@ class SettingsUpdate(BaseModel):
 class SettingsResponse(BaseModel):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
-    nano_banana_api_key: str = ""
     google_api_key: str = ""
     default_llm_provider: str = "anthropic"
-    default_image_provider: str = "nano_banana"
+    default_image_provider: str = "google"
     image_aspect_ratio: str = "1:1"
     image_size: str = "1K"
 
 
 class ValidateKeyRequest(BaseModel):
-    provider: str = Field(pattern=r"^(anthropic|openai|nano_banana|google)$")
+    provider: str = Field(pattern=r"^(anthropic|openai|google)$")
 
 
 class ValidateKeyResponse(BaseModel):

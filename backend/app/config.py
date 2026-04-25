@@ -11,10 +11,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = str(BASE_DIR / "przygoda.db")
     ANTHROPIC_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
-    NANO_BANANA_API_KEY: str = ""
     GOOGLE_API_KEY: str = ""
     LLM_PROVIDER: str = "anthropic"
-    IMAGE_PROVIDER: str = "nano_banana"
+    IMAGE_PROVIDER: str = "google"
     IMAGE_CONCURRENCY: int = 3  # max parallel image gen requests (2–3 to stay under typical provider RPM)
     APP_USERNAME: str = "admin"
     APP_PASSWORD_HASH: str = ""

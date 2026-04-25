@@ -186,7 +186,6 @@ export interface WsMessage {
 export interface AppSettings {
   anthropic_api_key: string;
   openai_api_key: string;
-  nano_banana_api_key: string;
   google_api_key: string;
   default_llm_provider: string;
   default_image_provider: string;

@@ -58,7 +58,7 @@ class TestImageVersionsSchema:
                    (project_id, kind, image_path, prompt_used, provider, version_number)
                    VALUES (?, 'reference', ?, ?, ?, ?)""",
                 (project_id, "/static/uploads/x/reference_v1.png",
-                 "a prompt", "nano_banana", 1),
+                 "a prompt", "google", 1),
             )
             await db.commit()
 
@@ -119,7 +119,7 @@ class TestImageVersionsSchema:
         await legacy.execute(
             """INSERT INTO image_versions
                (page_id, image_path, prompt_used, provider, version_number)
-               VALUES (?, '/static/p/3.png', 'old prompt', 'nano_banana', 1)""",
+               VALUES (?, '/static/p/3.png', 'old prompt', 'google', 1)""",
             (page_id,),
         )
         await legacy.commit()
@@ -147,7 +147,7 @@ class TestImageVersionsSchema:
                 """INSERT INTO image_versions
                    (project_id, kind, image_path, prompt_used, provider, version_number)
                    VALUES (?, 'reference', ?, ?, ?, ?)""",
-                (project_id, "/static/r/1.png", "ref", "nano_banana", 1),
+                (project_id, "/static/r/1.png", "ref", "google", 1),
             )
             await db.commit()
         finally:
@@ -241,7 +241,7 @@ class TestImageVersionsSchema:
                     prompt_used, provider, version_number)
                    VALUES (?, ?, 'page', ?, ?, ?, ?)""",
                 (page_id, project_id, "/static/p/1.png",
-                 "page prompt", "nano_banana", 1),
+                 "page prompt", "google", 1),
             )
             await db.commit()
 

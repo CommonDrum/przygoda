@@ -212,8 +212,6 @@ def classify_error(e: Exception) -> UserFacingError:
             return _CONFIG_MISSING("Anthropic")
         if "openai" in msg:
             return _CONFIG_MISSING("OpenAI")
-        if "nano_banana" in msg or "nano banana" in msg:
-            return _CONFIG_MISSING("Nano Banana")
         return _CONFIG_MISSING("dostawca AI")
 
     # Our business validation errors from story_service

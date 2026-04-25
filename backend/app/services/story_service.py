@@ -69,7 +69,7 @@ def _build_reference_images(project: dict, include_character: bool) -> list[byte
     """Build the ordered list of reference images passed to the image provider.
 
     Order matters for providers that can only use one — character ref last so
-    it wins (see NanoBananaImage.generate_image).
+    it wins for single-ref providers; multi-ref providers (Google) take both.
     """
     images: list[bytes] = []
     style_guide = _load_image_bytes(project.get("style_guide_image_path"))
@@ -84,8 +84,8 @@ def _build_reference_images(project: dict, include_character: bool) -> list[byte
 
 def _build_page_reference_images(project: dict, page: dict) -> list[bytes]:
     """Per-page references. Back cover skips the character ref so providers
-    that take only one image (nano_banana) don't pull the kid into a page
-    whose prompt is supposed to be a character-less symbolic scene."""
+    that take only one image don't pull the kid into a page whose prompt is
+    supposed to be a character-less symbolic scene."""
     include_character = page.get("page_type") != "back"
     return _build_reference_images(project, include_character=include_character)
 
@@ -258,7 +258,7 @@ async def generate_reference(project_id: int, ws_manager: ConnectionManager | No
                    (project_id, kind, image_path, prompt_used, provider, version_number)
                    VALUES (?, 'reference', ?, ?, ?, ?)""",
                 (project_id, image_path, ref_prompt,
-                 project.get("image_provider", "nano_banana"), new_version),
+                 project.get("image_provider", "google"), new_version),
             )
             await db.commit()
         finally:
@@ -336,7 +336,7 @@ async def regenerate_reference(project_id: int, ws_manager: ConnectionManager | 
                (project_id, kind, image_path, prompt_used, provider, version_number)
                VALUES (?, 'reference', ?, ?, ?, ?)""",
             (project_id, image_path, ref_prompt,
-             project.get("image_provider", "nano_banana"), new_version),
+             project.get("image_provider", "google"), new_version),
         )
         await db.commit()
     finally:
@@ -588,7 +588,7 @@ async def _generate_one_page(
                    (page_id, project_id, kind, image_path, prompt_used, provider, version_number)
                    VALUES (?, ?, 'page', ?, ?, ?, ?)""",
                 (page_id, project_id, image_path, page["image_prompt"],
-                 project.get("image_provider", "nano_banana"), new_version),
+                 project.get("image_provider", "google"), new_version),
             )
             await db.commit()
         finally:
@@ -868,7 +868,7 @@ async def regenerate_single_image(page_id: int, prompt: str | None = None) -> di
                (page_id, project_id, kind, image_path, prompt_used, provider, version_number)
                VALUES (?, ?, 'page', ?, ?, ?, ?)""",
             (page_id, page["project_id"], image_path, page["image_prompt"],
-             project.get("image_provider", "nano_banana"), new_version),
+             project.get("image_provider", "google"), new_version),
         )
         await db.commit()
 

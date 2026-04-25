@@ -121,7 +121,7 @@ class TestSettings:
         assert resp.status_code == 200
         data = resp.json()
         assert data["default_llm_provider"] == "anthropic"
-        assert data["default_image_provider"] == "nano_banana"
+        assert data["default_image_provider"] == "google"
 
     def test_update_and_get(self, client):
         client.put(

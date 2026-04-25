@@ -8,11 +8,8 @@ from ..config import settings
 from ..routers.settings import get_setting_value
 
 
-class DalleImage(ImageProvider):
-    """OpenAI images API: supports dall-e-3 / dall-e-2 / gpt-image-* models.
-
-    Kept the provider id `dalle` for backwards compatibility with stored projects.
-    """
+class OpenAIImage(ImageProvider):
+    """OpenAI images API: supports gpt-image-* and dall-e-* models."""
 
     ASPECT_TO_SIZE = {
         "1:1": "1024x1024",
@@ -25,7 +22,7 @@ class DalleImage(ImageProvider):
     }
 
     def __init__(self, model: str | None = None):
-        self.model = model or default_image_model("dalle")
+        self.model = model or default_image_model("openai")
 
     async def generate_image(
         self, prompt: str,
@@ -69,4 +66,4 @@ class DalleImage(ImageProvider):
                 img_resp.raise_for_status()
                 return img_resp.content
 
-        return await with_retry(_call, label=f"dalle:{self.model}")
+        return await with_retry(_call, label=f"openai-image:{self.model}")

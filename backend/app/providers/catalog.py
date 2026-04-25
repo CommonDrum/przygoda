@@ -43,16 +43,11 @@ IMAGE_MODELS: dict[str, list[dict]] = {
         {"id": "gemini-3.1-flash-image-preview", "label": "Nano Banana 2 (Gemini 3.1 Flash Image)", "is_default": True},
         {"id": "gemini-2.5-flash-image", "label": "Nano Banana (Gemini 2.5 Flash Image, legacy)", "is_default": False},
     ],
-    "dalle": [
+    "openai": [
         {"id": "gpt-image-2", "label": "GPT Image 2 (najnowszy)", "is_default": True},
         {"id": "gpt-image-1.5", "label": "GPT Image 1.5", "is_default": False},
         {"id": "gpt-image-1", "label": "GPT Image 1", "is_default": False},
         {"id": "dall-e-3", "label": "DALL-E 3 (legacy)", "is_default": False},
-    ],
-    "nano_banana": [
-        # nanobanana.com is a single-model service; expose a single entry so the
-        # UI renders a disabled select consistently.
-        {"id": "default", "label": "Nano Banana (pojedynczy model)", "is_default": True},
     ],
 }
 

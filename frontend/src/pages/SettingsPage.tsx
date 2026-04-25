@@ -72,10 +72,9 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings>({
     anthropic_api_key: "",
     openai_api_key: "",
-    nano_banana_api_key: "",
     google_api_key: "",
     default_llm_provider: "anthropic",
-    default_image_provider: "nano_banana",
+    default_image_provider: "google",
     image_aspect_ratio: "1:1",
     image_size: "1K",
   });
@@ -87,7 +86,6 @@ export default function SettingsPage() {
   >({
     anthropic: { loading: false, result: null },
     openai: { loading: false, result: null },
-    nano_banana: { loading: false, result: null },
     google: { loading: false, result: null },
   });
 
@@ -175,17 +173,6 @@ export default function SettingsPage() {
         />
 
         <ApiKeyField
-          label="Nano Banana API Key"
-          value={settings.nano_banana_api_key}
-          onChange={(val) =>
-            setSettings((s) => ({ ...s, nano_banana_api_key: val }))
-          }
-          provider="nano_banana"
-          validationState={validation.nano_banana}
-          onTest={testKey}
-        />
-
-        <ApiKeyField
           label="Google API Key (Gemini)"
           placeholder="AIzaSy..."
           value={settings.google_api_key}
@@ -202,7 +189,6 @@ export default function SettingsPage() {
             save({
               anthropic_api_key: settings.anthropic_api_key,
               openai_api_key: settings.openai_api_key,
-              nano_banana_api_key: settings.nano_banana_api_key,
               google_api_key: settings.google_api_key,
             })
           }
@@ -248,9 +234,8 @@ export default function SettingsPage() {
                 save({ default_image_provider: val });
               }}
             >
-              <option value="nano_banana">Nano Banana</option>
-              <option value="dalle">DALL-E 3</option>
               <option value="google">Google (Gemini)</option>
+              <option value="openai">OpenAI (GPT-Image / DALL·E)</option>
             </select>
           </div>
         </div>

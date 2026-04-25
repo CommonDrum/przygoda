@@ -70,7 +70,7 @@ async def get_project(project_id: int):
 @router.post("", response_model=ProjectResponse, status_code=201)
 async def create_project(data: ProjectCreate):
     llm_prov = data.llm_provider or await get_setting_value("default_llm_provider") or "anthropic"
-    img_prov = data.image_provider or await get_setting_value("default_image_provider") or "nano_banana"
+    img_prov = data.image_provider or await get_setting_value("default_image_provider") or "google"
 
     db = await get_db()
     try:

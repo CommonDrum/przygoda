@@ -27,7 +27,7 @@ async def _seed_project() -> int:
         cursor = await db.execute(
             """INSERT INTO projects
                (child_name, child_age, llm_provider, image_provider, status)
-               VALUES ('Zosia', 5, 'anthropic', 'nano_banana', 'draft')"""
+               VALUES ('Zosia', 5, 'anthropic', 'google', 'draft')"""
         )
         project_id = cursor.lastrowid
         page_defs = (

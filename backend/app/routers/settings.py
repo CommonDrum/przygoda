@@ -1,5 +1,4 @@
 import anthropic
-import httpx
 import openai
 from fastapi import APIRouter
 from google import genai
@@ -18,7 +17,6 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 SETTING_KEYS = [
     "anthropic_api_key",
     "openai_api_key",
-    "nano_banana_api_key",
     "google_api_key",
     "default_llm_provider",
     "default_image_provider",
@@ -28,7 +26,7 @@ SETTING_KEYS = [
 
 DEFAULTS = {
     "default_llm_provider": "anthropic",
-    "default_image_provider": "nano_banana",
+    "default_image_provider": "google",
     "image_aspect_ratio": "1:1",
     "image_size": "1K",
 }
@@ -36,7 +34,6 @@ DEFAULTS = {
 PROVIDER_KEY_MAP = {
     "anthropic": "anthropic_api_key",
     "openai": "openai_api_key",
-    "nano_banana": "nano_banana_api_key",
     "google": "google_api_key",
 }
 
@@ -129,18 +126,6 @@ async def validate_key(data: ValidateKeyRequest):
         elif data.provider == "google":
             client = genai.Client(api_key=api_key)
             await client.aio.models.get(model="gemini-2.0-flash")
-        elif data.provider == "nano_banana":
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.post(
-                    "https://api.nanobanana.com/v1/generate",
-                    json={"prompt": "test", "aspect_ratio": "1:1"},
-                    headers={"Authorization": f"Bearer {api_key}"},
-                )
-                # 401/403 = bad key, other errors might be OK (e.g. 400 = key works but bad request)
-                if resp.status_code in (401, 403):
-                    return ValidateKeyResponse(
-                        valid=False, error="Nieprawidłowy klucz API"
-                    )
 
         return ValidateKeyResponse(valid=True)
     except anthropic.AuthenticationError:

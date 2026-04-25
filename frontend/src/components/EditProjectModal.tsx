@@ -16,9 +16,8 @@ const LLM_PROVIDERS = [
 ];
 
 const IMAGE_PROVIDERS = [
-  { value: "nano_banana", label: "Nano Banana" },
-  { value: "dalle", label: "OpenAI (DALL·E / GPT-Image)" },
   { value: "google", label: "Google (Gemini)" },
+  { value: "openai", label: "OpenAI (GPT-Image / DALL·E)" },
 ];
 
 interface Props {

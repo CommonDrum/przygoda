@@ -12,9 +12,8 @@ const LLM_PROVIDERS = [
 ];
 
 const IMAGE_PROVIDERS = [
-  { value: "nano_banana", label: "Nano Banana" },
-  { value: "dalle", label: "OpenAI (DALL·E / GPT-Image)" },
   { value: "google", label: "Google (Gemini)" },
+  { value: "openai", label: "OpenAI (GPT-Image / DALL·E)" },
 ];
 
 const defaults: ProjectCreateInput = {
@@ -33,7 +32,7 @@ const defaults: ProjectCreateInput = {
   image_prompt_id: null,
   llm_provider: "anthropic",
   llm_model: null,
-  image_provider: "nano_banana",
+  image_provider: "google",
   image_model: null,
 };
 
@@ -254,7 +253,7 @@ export default function NewProjectPage() {
             label="Obrazki"
             kind="image"
             providerOptions={IMAGE_PROVIDERS}
-            provider={form.image_provider ?? "nano_banana"}
+            provider={form.image_provider ?? "google"}
             model={form.image_model ?? null}
             catalog={catalog?.image ?? null}
             onProviderChange={(p) => set("image_provider", p)}

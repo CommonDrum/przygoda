@@ -2,8 +2,7 @@ from .base import LLMProvider, ImageProvider
 from .anthropic_llm import AnthropicLLM
 from .openai_llm import OpenAILLM
 from .google_llm import GoogleLLM
-from .nano_banana_image import NanoBananaImage
-from .dalle_image import DalleImage
+from .openai_image import OpenAIImage
 from .google_image import GoogleImage
 from .catalog import (
     default_llm_model,
@@ -49,7 +48,7 @@ async def get_image_provider(
     provider = override or await get_setting_value("default_image_provider") or settings.IMAGE_PROVIDER
 
     match provider:
-        case "nano_banana" | "dalle" | "google":
+        case "openai" | "google":
             pass  # valid
         case _:
             raise ValueError(f"Unknown image provider: {provider}")
@@ -60,10 +59,8 @@ async def get_image_provider(
         model = default_image_model(provider)
 
     match provider:
-        case "nano_banana":
-            return NanoBananaImage(model=model)
-        case "dalle":
-            return DalleImage(model=model)
+        case "openai":
+            return OpenAIImage(model=model)
         case "google":
             return GoogleImage(model=model)
     raise ValueError(f"Unknown image provider: {provider}")  # unreachable

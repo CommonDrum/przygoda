@@ -33,7 +33,7 @@ async def init_db():
                 raw_image_prompts TEXT,
                 llm_provider TEXT DEFAULT 'anthropic',
                 llm_model TEXT,
-                image_provider TEXT DEFAULT 'nano_banana',
+                image_provider TEXT DEFAULT 'google',
                 image_model TEXT,
                 reference_image_prompt TEXT,
                 reference_image_path TEXT,
@@ -108,7 +108,9 @@ async def init_db():
             ("projects", "story_prompt_id", "INTEGER"),
             ("projects", "image_prompt_id", "INTEGER"),
             ("projects", "fulfillment_status", "TEXT NOT NULL DEFAULT 'oczekuje'"),
+            ("projects", "llm_provider", "TEXT DEFAULT 'anthropic'"),
             ("projects", "llm_model", "TEXT"),
+            ("projects", "image_provider", "TEXT DEFAULT 'google'"),
             ("projects", "image_model", "TEXT"),
             ("projects", "reference_image_is_custom", "INTEGER DEFAULT 0"),
             ("projects", "style_guide_image_path", "TEXT"),
@@ -138,6 +140,49 @@ async def init_db():
                  AND current_image_path IS NOT NULL"""
         )
         await db.commit()
+
+        # Migrate retired image-provider ids. Wrapped in try/except because
+        # ancient legacy schemas may not yet have an `image_provider` column at
+        # all — the ALTER TABLE migrations above just added it, but on really
+        # exotic shapes (test fixtures) the UPDATE could still fail.
+        try:
+            # `nano_banana` was a dead stub pointing at a non-existent
+            # api.nanobanana.com endpoint. The public name "Nano Banana" is
+            # just Google's gemini-2.5-flash-image, so route to Google.
+            await db.execute(
+                """UPDATE projects
+                   SET image_provider = 'google',
+                       image_model = COALESCE(NULLIF(image_model, 'default'), 'gemini-2.5-flash-image')
+                   WHERE image_provider = 'nano_banana'"""
+            )
+            # `dalle` was the legacy id for OpenAI's images API — same provider,
+            # just renamed for consistency with the LLM provider naming.
+            await db.execute(
+                "UPDATE projects SET image_provider = 'openai' WHERE image_provider = 'dalle'"
+            )
+            await db.commit()
+        except Exception:
+            pass
+
+        # If google_api_key is empty but nano_banana_api_key was set, copy it
+        # over so existing deployments don't lose access on first boot. Then
+        # drop the dead key.
+        try:
+            await db.execute(
+                """INSERT INTO settings (key, value)
+                   SELECT 'google_api_key', value FROM settings
+                   WHERE key = 'nano_banana_api_key' AND value != ''
+                     AND NOT EXISTS (
+                         SELECT 1 FROM settings WHERE key = 'google_api_key' AND value != ''
+                     )"""
+            )
+            await db.execute("DELETE FROM settings WHERE key = 'nano_banana_api_key'")
+            await db.execute(
+                "UPDATE settings SET value = 'google' WHERE key = 'default_image_provider' AND value = 'nano_banana'"
+            )
+            await db.commit()
+        except Exception:
+            pass
 
         # Seed prompts library from legacy settings if empty
         await _seed_prompts_from_settings(db)

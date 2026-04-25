@@ -5,8 +5,8 @@ import pytest_asyncio
 from app.providers.factory import get_llm_provider, get_image_provider
 from app.providers.anthropic_llm import AnthropicLLM
 from app.providers.openai_llm import OpenAILLM
-from app.providers.nano_banana_image import NanoBananaImage
-from app.providers.dalle_image import DalleImage
+from app.providers.google_image import GoogleImage
+from app.providers.openai_image import OpenAIImage
 
 
 class TestLLMFactory:
@@ -28,19 +28,29 @@ class TestLLMFactory:
 
 class TestImageFactory:
     @pytest.mark.asyncio
-    async def test_nano_banana_provider(self):
-        provider = await get_image_provider("nano_banana")
-        assert isinstance(provider, NanoBananaImage)
+    async def test_google_provider(self):
+        provider = await get_image_provider("google")
+        assert isinstance(provider, GoogleImage)
 
     @pytest.mark.asyncio
-    async def test_dalle_provider(self):
-        provider = await get_image_provider("dalle")
-        assert isinstance(provider, DalleImage)
+    async def test_openai_provider(self):
+        provider = await get_image_provider("openai")
+        assert isinstance(provider, OpenAIImage)
 
     @pytest.mark.asyncio
     async def test_invalid_provider_raises(self):
         with pytest.raises(ValueError, match="Unknown image provider"):
             await get_image_provider("midjourney")
+
+    @pytest.mark.asyncio
+    async def test_dead_provider_raises(self):
+        """The retired `nano_banana` and `dalle` provider ids must NOT resolve
+        — the factory should reject them so a stale config crashes loudly
+        instead of silently routing to the wrong API."""
+        with pytest.raises(ValueError, match="Unknown image provider"):
+            await get_image_provider("nano_banana")
+        with pytest.raises(ValueError, match="Unknown image provider"):
+            await get_image_provider("dalle")
 
 
 class TestProviderValidation:
