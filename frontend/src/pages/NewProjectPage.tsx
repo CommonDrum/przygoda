@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { ModelCatalog, ProjectCreateInput, Prompt } from "../lib/types";
+import type { ArtStyle, ModelCatalog, ProjectCreateInput, Prompt } from "../lib/types";
+import { ART_STYLE_OPTIONS } from "../lib/types";
 import { createProject, getModelCatalog, listPrompts } from "../lib/api";
 import { useToast } from "../context/ToastContext";
 import ProviderModelSelect from "../components/ProviderModelSelect";
@@ -28,6 +29,7 @@ const defaults: ProjectCreateInput = {
   story_type: "",
   hobby: "",
   moral: "",
+  art_style: "storybook",
   story_prompt_id: null,
   image_prompt_id: null,
   llm_provider: "anthropic",
@@ -226,6 +228,29 @@ export default function NewProjectPage() {
               placeholder="np. wiara w siebie, przyjaźń, odwaga"
               required
             />
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="label-warm">
+              Styl graficzny
+              <span className="text-bark-300 font-normal ml-2 text-xs">
+                — chroni przed fotorealistycznym dzieckiem
+              </span>
+            </label>
+            <select
+              className="input-warm"
+              value={form.art_style ?? "storybook"}
+              onChange={(e) => set("art_style", e.target.value as ArtStyle)}
+            >
+              {ART_STYLE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-bark-400 mt-1">
+              {ART_STYLE_OPTIONS.find((o) => o.value === form.art_style)?.hint}
+            </p>
           </div>
         </div>
 

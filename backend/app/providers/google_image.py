@@ -24,6 +24,12 @@ class GoogleImage(ImageProvider):
         aspect_ratio: str = "1:1",
         image_size: str = "1K",
     ) -> bytes:
+        # Gemini Image API rejects anything other than 1K/2K with a 400. Old
+        # deployments may have legacy '512' / '1024' / '4K' in their settings
+        # row — coerce defensively so a stale config doesn't break generation.
+        if image_size not in ("1K", "2K"):
+            image_size = "1K"
+
         client = await self._get_client()
 
         contents = []

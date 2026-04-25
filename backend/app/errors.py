@@ -204,6 +204,20 @@ def classify_error(e: Exception) -> UserFacingError:
             or "finish_reason" in msg or "safety" in msg or "block_reason" in msg:
         return _SAFETY_BLOCK(str(e)[:200])
 
+    # Google INVALID_ARGUMENT — usually a bad image_size / aspect_ratio combo
+    # for a model that doesn't support it. Surface a useful message instead of
+    # the raw provider blob.
+    if "invalid_argument" in msg or "is not supported for this model" in msg:
+        return UserFacingError(
+            "CONTENT_INVALID",
+            "Nieprawidłowy parametr generowania",
+            f"Dostawca AI odrzucił parametr (np. rozmiar / aspect ratio "
+            f"niedostępny dla wybranego modelu). Sprawdź ustawienia. "
+            f"Szczegóły: {str(e)[:200]}",
+            retryable=False,
+            status=400,
+        )
+
     # "Google API key not configured" etc.
     if "api key not configured" in msg or "api key" in msg and "not" in msg:
         if "google" in msg:

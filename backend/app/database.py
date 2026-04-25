@@ -42,6 +42,7 @@ async def init_db():
                 style_guide_image_path TEXT,
                 story_prompt_id INTEGER,
                 image_prompt_id INTEGER,
+                art_style TEXT NOT NULL DEFAULT 'storybook',
                 fulfillment_status TEXT NOT NULL DEFAULT 'oczekuje',
                 status TEXT DEFAULT 'draft',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -114,6 +115,7 @@ async def init_db():
             ("projects", "image_model", "TEXT"),
             ("projects", "reference_image_is_custom", "INTEGER DEFAULT 0"),
             ("projects", "style_guide_image_path", "TEXT"),
+            ("projects", "art_style", "TEXT NOT NULL DEFAULT 'storybook'"),
             ("image_versions", "project_id", "INTEGER"),
             ("image_versions", "kind", "TEXT NOT NULL DEFAULT 'page'"),
             ("pages", "image_status", "TEXT NOT NULL DEFAULT 'pending'"),
@@ -179,6 +181,11 @@ async def init_db():
             await db.execute("DELETE FROM settings WHERE key = 'nano_banana_api_key'")
             await db.execute(
                 "UPDATE settings SET value = 'google' WHERE key = 'default_image_provider' AND value = 'nano_banana'"
+            )
+            # Gemini Image API only accepts '1K' or '2K' — older deployments had
+            # '512' / '4K' in the dropdown; map anything illegal back to '1K'.
+            await db.execute(
+                "UPDATE settings SET value = '1K' WHERE key = 'image_size' AND value NOT IN ('1K', '2K')"
             )
             await db.commit()
         except Exception:

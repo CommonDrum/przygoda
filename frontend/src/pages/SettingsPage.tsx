@@ -272,10 +272,8 @@ export default function SettingsPage() {
                 save({ image_size: val });
               }}
             >
-              <option value="512">512 (0.5K)</option>
-              <option value="1K">1K</option>
-              <option value="2K">2K</option>
-              <option value="4K">4K</option>
+              <option value="1K">1K (~1024px)</option>
+              <option value="2K">2K (~2048px)</option>
             </select>
           </div>
         </div>

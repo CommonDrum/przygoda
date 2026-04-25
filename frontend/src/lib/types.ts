@@ -35,6 +35,23 @@ export const FULFILLMENT_ORDER: FulfillmentStatus[] = [
 
 export type ExportFormat = "zip" | "excel" | "txt";
 
+export type ArtStyle =
+  | "storybook"
+  | "pixar"
+  | "watercolor"
+  | "anime"
+  | "flat"
+  | "crayon";
+
+export const ART_STYLE_OPTIONS: { value: ArtStyle; label: string; hint: string }[] = [
+  { value: "storybook", label: "Klasyczna ilustracja książkowa", hint: "Ciepła, malarska, klasyka książek dla dzieci" },
+  { value: "pixar", label: "Pixar / Disney 3D", hint: "Renderowana animacja 3D, wyraziste oczy" },
+  { value: "watercolor", label: "Akwarela", hint: "Delikatne pastelowe rozmycia, widać pociągnięcia pędzla" },
+  { value: "anime", label: "Anime / Studio Ghibli", hint: "Cel-shading, malowane tła, magia" },
+  { value: "flat", label: "Płaska wektorowa", hint: "Geometryczne kształty, mocne kolory, nowoczesny look" },
+  { value: "crayon", label: "Kredkowa / dziecięca", hint: "Naiwna kreska kredkowa, papierowa faktura" },
+];
+
 export interface Project {
   id: number;
   child_name: string;
@@ -48,6 +65,7 @@ export interface Project {
   story_type: string;
   hobby: string;
   moral: string;
+  art_style: ArtStyle;
   raw_story: string | null;
   raw_image_prompts: string | null;
   llm_provider: string;
@@ -79,6 +97,7 @@ export interface ProjectCreateInput {
   story_type: string;
   hobby: string;
   moral: string;
+  art_style?: ArtStyle;
   llm_provider?: string;
   llm_model?: string | null;
   image_provider?: string;
@@ -99,6 +118,7 @@ export interface ProjectUpdateInput {
   story_type?: string;
   hobby?: string;
   moral?: string;
+  art_style?: ArtStyle;
   llm_provider?: string;
   llm_model?: string | null;
   image_provider?: string;

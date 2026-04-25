@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field
 
 FulfillmentStatus = Literal["oczekuje", "w_drukarni", "wyslane", "doreczone"]
 
+ArtStyle = Literal["storybook", "pixar", "watercolor", "anime", "flat", "crayon"]
+
 
 # --- Projects ---
 
@@ -20,6 +22,7 @@ class ProjectCreate(BaseModel):
     story_type: str = Field(min_length=1)
     hobby: str = Field(min_length=1)
     moral: str = Field(min_length=1)
+    art_style: ArtStyle = "storybook"
     story_prompt_id: int | None = None
     image_prompt_id: int | None = None
     llm_provider: str | None = None
@@ -40,6 +43,7 @@ class ProjectUpdate(BaseModel):
     story_type: str | None = None
     hobby: str | None = None
     moral: str | None = None
+    art_style: ArtStyle | None = None
     llm_provider: str | None = None
     llm_model: str | None = None
     image_provider: str | None = None
@@ -66,6 +70,7 @@ class ProjectResponse(BaseModel):
     story_type: str
     hobby: str
     moral: str
+    art_style: ArtStyle = "storybook"
     raw_story: str | None = None
     raw_image_prompts: str | None = None
     llm_provider: str
@@ -169,7 +174,8 @@ class SettingsUpdate(BaseModel):
     default_llm_provider: str | None = None
     default_image_provider: str | None = None
     image_aspect_ratio: str | None = None
-    image_size: str | None = None
+    # Gemini Image API rejects anything other than '1K' / '2K' with a 400.
+    image_size: str | None = Field(default=None, pattern=r"^(1K|2K)$")
 
 
 class SettingsResponse(BaseModel):

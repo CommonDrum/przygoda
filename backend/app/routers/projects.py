@@ -78,14 +78,15 @@ async def create_project(data: ProjectCreate):
             """INSERT INTO projects
                (child_name, child_age, child_gender, hair_color, hair_style,
                 skin_tone, eye_color, outfit_description, story_type, hobby, moral,
-                llm_provider, llm_model, image_provider, image_model,
+                art_style, llm_provider, llm_model, image_provider, image_model,
                 story_prompt_id, image_prompt_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 data.child_name, data.child_age, data.child_gender,
                 data.hair_color, data.hair_style, data.skin_tone,
                 data.eye_color, data.outfit_description,
                 data.story_type, data.hobby, data.moral,
+                data.art_style,
                 llm_prov, data.llm_model,
                 img_prov, data.image_model,
                 data.story_prompt_id, data.image_prompt_id,

@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import type {
+  ArtStyle,
   ModelCatalog,
   Project,
   ProjectUpdateInput,
   Prompt,
 } from "../lib/types";
+import { ART_STYLE_OPTIONS } from "../lib/types";
 import { updateProject, listPrompts, getModelCatalog } from "../lib/api";
 import { useToast } from "../context/ToastContext";
 import ProviderModelSelect from "./ProviderModelSelect";
@@ -40,6 +42,7 @@ export default function EditProjectModal({ project, onSave, onClose }: Props) {
     story_type: project.story_type,
     hobby: project.hobby,
     moral: project.moral,
+    art_style: project.art_style,
     llm_provider: project.llm_provider,
     llm_model: project.llm_model,
     image_provider: project.image_provider,
@@ -150,6 +153,43 @@ export default function EditProjectModal({ project, onSave, onClose }: Props) {
             <label className="label-warm">Przesłanie moralne</label>
             <input className="input-warm" value={form.moral ?? ""} onChange={(e) => set("moral", e.target.value)} required />
           </div>
+
+          {(() => {
+            // Style is locked once the user uploaded their own character ref
+            // (the image dictates the look) or once the project moved past
+            // 'draft' (changing mid-pipeline would create inconsistent pages).
+            const styleLocked = project.reference_image_is_custom || project.status !== "draft";
+            const lockReason = project.reference_image_is_custom
+              ? "Zablokowane — wgrałeś własny obrazek postaci, on dyktuje styl."
+              : project.status !== "draft"
+                ? "Zablokowane — nie można zmieniać stylu po wygenerowaniu referencji."
+                : null;
+            return (
+              <div>
+                <label className="label-warm">
+                  Styl graficzny
+                  <span className="text-bark-300 font-normal ml-2 text-xs">
+                    — chroni przed fotorealistycznym dzieckiem
+                  </span>
+                </label>
+                <select
+                  className="input-warm disabled:opacity-60 disabled:cursor-not-allowed"
+                  value={form.art_style ?? project.art_style}
+                  onChange={(e) => set("art_style", e.target.value as ArtStyle)}
+                  disabled={styleLocked}
+                >
+                  {ART_STYLE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-bark-400 mt-1">
+                  {lockReason ?? ART_STYLE_OPTIONS.find((o) => o.value === (form.art_style ?? project.art_style))?.hint}
+                </p>
+              </div>
+            );
+          })()}
 
           <ProviderModelSelect
             label="Tekst (LLM)"
