@@ -16,6 +16,8 @@ from ..templates.image_prompt import (
     build_reference_user_prompt,
     build_page_system_prompt,
     build_page_user_prompt,
+    build_cover_image_prompt,
+    build_back_image_prompt,
 )
 from ..config import settings, UPLOADS_DIR, STATIC_DIR
 from .ws_manager import ConnectionManager
@@ -78,6 +80,14 @@ def _build_reference_images(project: dict, include_character: bool) -> list[byte
         if character:
             images.append(character)
     return images
+
+
+def _build_page_reference_images(project: dict, page: dict) -> list[bytes]:
+    """Per-page references. Back cover skips the character ref so providers
+    that take only one image (nano_banana) don't pull the kid into a page
+    whose prompt is supposed to be a character-less symbolic scene."""
+    include_character = page.get("page_type") != "back"
+    return _build_reference_images(project, include_character=include_character)
 
 
 async def _get_project(project_id: int) -> dict:
@@ -456,22 +466,49 @@ async def generate_page_prompts(project_id: int, ws_manager: ConnectionManager |
             return [p.strip() for p in raw.split(SEPARATOR) if p.strip()]
 
         def _validate(prompts, raw):
-            if len(prompts) < 17:
-                raise ValueError(f"Oczekiwano 17 promptów, otrzymano {len(prompts)}.")
+            # Accept 15 (new default — story prompts only) or 17+ (legacy
+            # custom prompt that still produces cover+15+back). In the legacy
+            # case we discard prompts[0] (cover) and prompts[16] (back) below
+            # — Python templates always win for those.
+            if len(prompts) not in (15,) and len(prompts) < 17:
+                raise ValueError(
+                    f"Oczekiwano 15 promptów (po jednym na segment historii), "
+                    f"otrzymano {len(prompts)}."
+                )
 
         raw_prompts, prompts = await _call_llm_with_retry(
             llm, system_prompt, user_prompt, ws_manager, project_id,
             "prompts", _validate, _parse,
         )
 
+        # Pick the 15 story-page prompts regardless of whether the LLM
+        # returned 15 (new) or 17 with cover+back (legacy custom prompt).
+        if len(prompts) >= 17:
+            story_prompts = prompts[1:16]
+        else:
+            story_prompts = prompts[:15]
+
+        # Cover (page 1) and back (page 17) are ALWAYS built by Python
+        # templates — invariant under any custom system prompt.
+        cover_prompt = build_cover_image_prompt(project)
+        back_prompt = build_back_image_prompt(project)
+
         db = await get_db()
         try:
-            for i, prompt in enumerate(prompts[:17]):
-                page_number = i + 1
+            await db.execute(
+                "UPDATE pages SET image_prompt = ? WHERE project_id = ? AND page_number = 1",
+                (cover_prompt, project_id),
+            )
+            for i, prompt in enumerate(story_prompts):
+                page_number = i + 2
                 await db.execute(
                     "UPDATE pages SET image_prompt = ? WHERE project_id = ? AND page_number = ?",
                     (prompt, project_id, page_number),
                 )
+            await db.execute(
+                "UPDATE pages SET image_prompt = ? WHERE project_id = ? AND page_number = 17",
+                (back_prompt, project_id),
+            )
             await db.commit()
         finally:
             await db.close()
@@ -611,7 +648,6 @@ async def _run_page_batch(
 
     upload_dir = str(UPLOADS_DIR / str(project_id))
     os.makedirs(upload_dir, exist_ok=True)
-    reference_images = _build_reference_images(project, include_character=True)
 
     completed = 0
     failed = 0
@@ -624,7 +660,7 @@ async def _run_page_batch(
             ok = await _generate_one_page(
                 project, page,
                 image_provider=image_provider,
-                reference_images=reference_images,
+                reference_images=_build_page_reference_images(project, page),
                 aspect_ratio=aspect_ratio, image_size=image_size,
                 upload_dir=upload_dir, ws_manager=ws_manager,
             )
@@ -693,8 +729,13 @@ async def generate_images(project_id: int, ws_manager: ConnectionManager):
     finally:
         await db.close()
 
-    await _run_page_batch(project_id, pages, ws_manager)
-    await _finalize_image_batch(project_id, ws_manager)
+    # finalize in `finally` so a mid-batch crash never leaves the project
+    # stuck in images_generating — finalize reads per-page image_status from
+    # DB and picks the right terminal state (review / partial / prompts_generated).
+    try:
+        await _run_page_batch(project_id, pages, ws_manager)
+    finally:
+        await _finalize_image_batch(project_id, ws_manager)
 
 
 async def retry_failed_images(
@@ -734,8 +775,10 @@ async def retry_failed_images(
     await _update_project_status(project_id, STATUS_IMAGES_GENERATING)
     await _broadcast_status(ws_manager, project_id, STATUS_IMAGES_GENERATING)
 
-    await _run_page_batch(project_id, pages, ws_manager)
-    await _finalize_image_batch(project_id, ws_manager)
+    try:
+        await _run_page_batch(project_id, pages, ws_manager)
+    finally:
+        await _finalize_image_batch(project_id, ws_manager)
     return await _get_project(project_id)
 
 
@@ -768,7 +811,7 @@ async def regenerate_single_image(page_id: int, prompt: str | None = None) -> di
     if not page.get("image_prompt"):
         raise ValueError("No image prompt for this page")
 
-    reference_images = _build_reference_images(project, include_character=True)
+    reference_images = _build_page_reference_images(project, page)
 
     aspect_ratio = await get_setting_value("image_aspect_ratio") or "1:1"
     image_size = await get_setting_value("image_size") or "1K"

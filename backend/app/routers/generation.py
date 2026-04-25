@@ -40,6 +40,19 @@ def set_ws_manager(manager: ConnectionManager):
     ws_manager = manager
 
 
+# Strong refs to fire-and-forget background tasks so the GC can't kill them
+# mid-run (asyncio holds only weak refs in some Python versions). Tasks remove
+# themselves on completion via the done-callback.
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_bg(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+    return task
+
+
 def _handle_error(e: Exception):
     """Let the global exception handler classify it — but keep a traceback
     log here so we have the path info. Just re-raise."""
@@ -177,7 +190,7 @@ async def api_generate_images(project_id: int):
         except Exception:
             logger.exception("generate_images task crashed for project %d", project_id)
 
-    asyncio.create_task(_run())
+    _spawn_bg(_run())
     return {"status": "started"}
 
 
@@ -204,7 +217,7 @@ async def api_retry_failed_images(project_id: int):
                 "retry_failed_images task crashed for project %d", project_id,
             )
 
-    asyncio.create_task(_run())
+    _spawn_bg(_run())
     return {"status": "started"}
 
 

@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import zipfile
 
@@ -7,6 +8,8 @@ from openpyxl.drawing.image import Image as XlImage
 
 from ..config import STATIC_DIR, EXPORTS_DIR
 from ..database import get_db
+
+logger = logging.getLogger(__name__)
 
 
 async def _get_project_and_pages(project_id: int):
@@ -181,8 +184,11 @@ async def export_excel(project_id: int) -> str:
                     img.width = 150
                     img.height = 150
                     ws_pages.add_image(img, f"E{row_idx}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        "Excel export: failed to embed image for project %d page %d (%s) — continuing without thumbnail",
+                        project_id, page["page_number"], type(e).__name__,
+                    )
 
     ws_pages.column_dimensions["C"].width = 60
     ws_pages.column_dimensions["D"].width = 60

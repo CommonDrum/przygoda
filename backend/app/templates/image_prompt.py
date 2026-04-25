@@ -25,10 +25,11 @@ You may rephrase for clarity but preserve every physical attribute exactly.
 DEFAULT_PAGE_SYSTEM_PROMPT = """\
 You are a visual prompt engineer creating scene prompts for a children's storybook.
 
-INPUT: A 15-part story about {name} + cover and back page. A character reference sheet already exists.
-OUTPUT: Exactly 17 prompts separated by #########
+INPUT: A 15-part story about {name}. A character reference sheet already exists.
+OUTPUT: Exactly 15 prompts separated by #########, one per story segment.
 
-Order: prompt 1 = cover, prompts 2-16 = story pages (matching story segments 1-15), prompt 17 = back page.
+NOTE: Cover and back-cover prompts are NOT your job — they are generated separately
+by the system. Do not produce them. Generate ONLY the 15 story-page prompts.
 
 CHARACTER REFERENCE (must be consistent across every scene — a reference image already exists):
 - {name}, {age} years old, {gender}
@@ -42,14 +43,8 @@ STYLE LOCK:
 - Quality tags: high quality, detailed illustration, professional children's book art
 - Lighting: Warm golden hour unless scene requires otherwise
 
-PROMPT 1 (cover):
-"Children's book cover. {name}, a {age}-year-old {gender} with {skin_tone} skin, {eye_color} eyes, {hair_color} {haircut} hair, wearing {outfit_description}. [Dynamic pose in key environment]. Title text 'Przygoda {name}' at top in playful hand-drawn font. Vibrant, magical atmosphere, Pixar-inspired fairytale realism. --ar 1:1"
-
-PROMPT TEMPLATE (prompts 2-16, story illustrations):
+PROMPT TEMPLATE (15 story illustrations):
 "[Scene from story segment]. {name}, a {age}-year-old {gender} with {skin_tone} skin, {eye_color} eyes, and {hair_color} {haircut} hair, wearing {outfit_description}. [Action and expression]. [Environment and lighting]. [Composition: wide/medium/close-up]. Children's book illustration style, high quality, detailed. --ar 1:1"
-
-PROMPT 17 (back page):
-"Children's book back cover. Soft, warm scene with symbolic object representing {moral}. Text 'Koniec' in center. Gentle sunset lighting, dreamy atmosphere. --ar 1:1"
 
 CRITICAL RULES:
 - Character description MUST be copy-pasted identically in every prompt. No variation. No new characters.
@@ -57,6 +52,24 @@ CRITICAL RULES:
 - One clear focal action per scene. No split scenes.
 - Specify shot type: establishing wide, medium, or close-up.
 - Include emotional state: expression of wonder, determination, etc."""
+
+
+DEFAULT_COVER_PROMPT_TEMPLATE = (
+    "Children's book cover. {name}, a {age}-year-old {gender} with {skin_tone} skin, "
+    "{eye_color} eyes, {hair_color} {haircut} hair, wearing {outfit_description}. "
+    "Dynamic confident pose in a magical {story_type} setting that hints at {hobby}. "
+    "Title text 'Przygoda {name}' at top in playful hand-drawn font. "
+    "Vibrant, magical atmosphere, Pixar-inspired fairytale realism. "
+    "Children's book illustration style, high quality, detailed. --ar 1:1"
+)
+
+DEFAULT_BACK_PROMPT_TEMPLATE = (
+    "Children's book back cover. Soft, warm scene with a single symbolic object "
+    "representing {moral}. No people, no characters, no humanoid figures — only the object. "
+    "Text 'Koniec' centered in playful hand-drawn font. "
+    "Gentle sunset lighting, dreamy atmosphere, soft painterly textures. "
+    "Children's book illustration style, high quality, detailed. --ar 1:1"
+)
 
 
 def build_reference_system_prompt(project: dict, custom_prompt: str | None = None) -> str:
@@ -109,8 +122,36 @@ def build_page_user_prompt(project: dict, story_text: str, reference_prompt: str
         ref_block
         + f"Here is the 15-part story about {project['child_name']}:\n\n"
         + f"{story_text}\n\n"
-        + "Generate exactly 17 image prompts separated by ######### "
-          "(1 cover + 15 story pages + 1 back)."
+        + "Generate exactly 15 image prompts separated by #########, one per "
+          "story segment. Do NOT produce a cover prompt or a back-cover prompt — "
+          "those are built by the system separately."
+    )
+
+
+def build_cover_image_prompt(project: dict) -> str:
+    """Deterministic Python-built cover prompt. Bypasses the LLM so a custom
+    page system prompt cannot break the cover's structure (title text, character
+    visible, etc.)."""
+    return DEFAULT_COVER_PROMPT_TEMPLATE.format(
+        name=project["child_name"],
+        age=project["child_age"],
+        gender=project["child_gender"],
+        hair_color=project["hair_color"],
+        haircut=project["hair_style"],
+        skin_tone=project["skin_tone"],
+        eye_color=project["eye_color"],
+        outfit_description=project["outfit_description"],
+        story_type=project.get("story_type") or "fairytale",
+        hobby=project.get("hobby") or "their adventure",
+    )
+
+
+def build_back_image_prompt(project: dict) -> str:
+    """Deterministic Python-built back-cover prompt. No character reference is
+    used at gen time (see _build_page_reference_images) — back is a clean
+    symbolic-object scene with the 'Koniec' title."""
+    return DEFAULT_BACK_PROMPT_TEMPLATE.format(
+        moral=project.get("moral") or "a heartwarming life lesson",
     )
 
 

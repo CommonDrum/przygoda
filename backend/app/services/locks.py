@@ -48,6 +48,9 @@ async def project_busy(project_id: int):
             yield
         finally:
             _project_busy.discard(project_id)
+    # Drop the lock from the registry so it doesn't accumulate per
+    # project_id forever. Safe because we just exited `async with lock`.
+    _project_locks.pop(project_id, None)
 
 
 # --- Per-page (for single-image regen) ---
@@ -75,3 +78,4 @@ async def page_busy(page_id: int):
             yield
         finally:
             _page_busy.discard(page_id)
+    _page_locks.pop(page_id, None)

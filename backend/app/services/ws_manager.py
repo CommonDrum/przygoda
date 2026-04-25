@@ -1,6 +1,9 @@
 import json
+import logging
 
 from fastapi import WebSocket
+
+logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
@@ -19,8 +22,14 @@ class ConnectionManager:
             conns.remove(ws)
 
     async def send_to_project(self, project_id: int, message: dict):
-        for ws in self.connections.get(project_id, []):
+        # Snapshot the list — we may mutate it while iterating (dropping dead
+        # sockets) and don't want to skip entries.
+        for ws in list(self.connections.get(project_id, [])):
             try:
                 await ws.send_text(json.dumps(message))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "WS send failed for project %d (%s) — dropping connection",
+                    project_id, type(e).__name__,
+                )
+                self.disconnect(project_id, ws)
