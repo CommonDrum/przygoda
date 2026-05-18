@@ -788,7 +788,10 @@ async def retry_failed_images(
 # Single page image regeneration
 # ============================================================
 
-async def regenerate_single_image(page_id: int, prompt: str | None = None) -> dict:
+async def regenerate_single_image(
+    page_id: int, prompt: str | None = None,
+    ws_manager: ConnectionManager | None = None,
+) -> dict:
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM pages WHERE id = ?", (page_id,))
@@ -876,6 +879,14 @@ async def regenerate_single_image(page_id: int, prompt: str | None = None) -> di
 
         cursor = await db.execute("SELECT * FROM pages WHERE id = ?", (page_id,))
         row = await cursor.fetchone()
-        return {k: row[k] for k in row.keys()}
+        result = {k: row[k] for k in row.keys()}
     finally:
         await db.close()
+
+    # Re-finalize project status: a successful single-page regen can bring a
+    # partial project back to STATUS_REVIEW, or unstick a project that's been
+    # parked in images_partial after its last failing page is fixed.
+    project_status = (await _get_project(page["project_id"]))["status"]
+    if project_status in (STATUS_IMAGES_PARTIAL, STATUS_REVIEW):
+        await _finalize_image_batch(page["project_id"], ws_manager)
+    return result

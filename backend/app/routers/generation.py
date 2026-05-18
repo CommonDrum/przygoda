@@ -228,7 +228,9 @@ async def api_regenerate_image(
     try:
         async with page_busy(page_id):
             prompt = body.prompt if body else None
-            return await regenerate_single_image(page_id, prompt=prompt)
+            return await regenerate_single_image(
+                page_id, prompt=prompt, ws_manager=ws_manager,
+            )
     except ProjectBusyError:
         raise HTTPException(409, "Ta strona jest w trakcie regeneracji")
     except HTTPException:
