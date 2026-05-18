@@ -19,17 +19,24 @@ class OpenAILLM(LLMProvider):
             raise ValueError("OpenAI API key not configured")
         return openai.AsyncOpenAI(api_key=api_key)
 
+    def _token_limit_kwargs(self, value: int) -> dict:
+        # gpt-5.x / o-series only accept max_completion_tokens; legacy chat
+        # completions models still want max_tokens. Pick by model prefix.
+        if self.model.startswith(("gpt-5", "o1", "o3", "o4")):
+            return {"max_completion_tokens": value}
+        return {"max_tokens": value}
+
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
         client = await self._get_client()
 
         async def _call():
             response = await client.chat.completions.create(
                 model=self.model,
-                max_tokens=8192,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                **self._token_limit_kwargs(16384),
             )
             if not response.choices or not response.choices[0].message.content:
                 raise ValueError("OpenAI returned empty response")
@@ -45,12 +52,12 @@ class OpenAILLM(LLMProvider):
         async def _stream():
             stream = await client.chat.completions.create(
                 model=self.model,
-                max_tokens=8192,
                 stream=True,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                **self._token_limit_kwargs(16384),
             )
             async for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:

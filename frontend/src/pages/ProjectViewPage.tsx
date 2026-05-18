@@ -484,7 +484,9 @@ export default function ProjectViewPage() {
           </button>
         )}
 
-        {(project.status === "review" || project.status === "exported") && (
+        {(project.status === "review"
+          || project.status === "exported"
+          || project.status === "images_partial") && (
           <>
             <button
               onClick={() => handleExport("zip")}

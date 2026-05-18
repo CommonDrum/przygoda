@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 
 from ..database import get_db
 from ..errors import classify_error
@@ -23,7 +24,14 @@ from ..config import settings, UPLOADS_DIR, STATIC_DIR
 from .ws_manager import ConnectionManager
 
 SEPARATOR = "#########"
+# Tolerant separator: any run of 4+ # on its own (optionally surrounded by
+# spaces). LLMs occasionally drift to 8 or 10 hashes, or wrap them in spaces.
+SEPARATOR_RE = re.compile(r"\s*#{4,}\s*")
 MAX_LLM_RETRIES = 2  # on top of the first call → up to 3 total
+
+
+def _split_segments(raw: str) -> list[str]:
+    return [s.strip() for s in SEPARATOR_RE.split(raw) if s.strip()]
 
 STATUS_DRAFT = "draft"
 STATUS_REF_GENERATING = "ref_pic_generating"
@@ -209,7 +217,7 @@ async def generate_reference(project_id: int, ws_manager: ConnectionManager | No
 
         def _parse(raw: str) -> str:
             # Take the first non-empty block if LLM added separators anyway.
-            blocks = [b.strip() for b in raw.split(SEPARATOR) if b.strip()]
+            blocks = _split_segments(raw)
             return blocks[0] if blocks else raw.strip()
 
         def _validate(parsed: str, raw: str):
@@ -394,16 +402,13 @@ async def generate_story(project_id: int, ws_manager: ConnectionManager | None =
 
         llm = await get_llm_provider(project.get("llm_provider"), project.get("llm_model"))
 
-        def _parse(raw: str):
-            return [s.strip() for s in raw.split(SEPARATOR) if s.strip()]
-
         def _validate(segments, raw):
             if len(segments) < 15:
                 raise ValueError(f"Oczekiwano 15 segmentów historii, otrzymano {len(segments)}.")
 
         raw_story, segments = await _call_llm_with_retry(
             llm, system_prompt, user_prompt, ws_manager, project_id,
-            "story", _validate, _parse,
+            "story", _validate, _split_segments,
         )
 
         db = await get_db()
@@ -462,9 +467,6 @@ async def generate_page_prompts(project_id: int, ws_manager: ConnectionManager |
 
         llm = await get_llm_provider(project.get("llm_provider"), project.get("llm_model"))
 
-        def _parse(raw: str):
-            return [p.strip() for p in raw.split(SEPARATOR) if p.strip()]
-
         def _validate(prompts, raw):
             # Accept 15 (new default — story prompts only) or 17+ (legacy
             # custom prompt that still produces cover+15+back). In the legacy
@@ -478,7 +480,7 @@ async def generate_page_prompts(project_id: int, ws_manager: ConnectionManager |
 
         raw_prompts, prompts = await _call_llm_with_retry(
             llm, system_prompt, user_prompt, ws_manager, project_id,
-            "prompts", _validate, _parse,
+            "prompts", _validate, _split_segments,
         )
 
         # Pick the 15 story-page prompts regardless of whether the LLM
